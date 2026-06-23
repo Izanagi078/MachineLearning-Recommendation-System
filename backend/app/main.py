@@ -322,6 +322,14 @@ def submit_rating(rating: RatingCreate, db: Session = Depends(get_db)):
     
     return {"message": "Rating processed successfully and model updated in real-time."}
 
+@app.get("/api/users/{userId}/ratings")
+def get_user_ratings(userId: str, db: Session = Depends(get_db)):
+    """
+    Returns all ratings submitted by a specific user in SQLite.
+    """
+    ratings = db.query(DBRating).filter(DBRating.userId == userId).all()
+    return {r.movieId: r.rating for r in ratings}
+
 @app.get("/api/feed")
 def get_global_feed(db: Session = Depends(get_db), limit: int = 10):
     """

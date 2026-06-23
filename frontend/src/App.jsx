@@ -4,10 +4,12 @@ import LiveFeed from './components/LiveFeed';
 import Onboarding from './components/Onboarding';
 import MovieShelf from './components/MovieShelf';
 import VisualCharts from './components/VisualCharts';
+import LoginModal from './components/LoginModal';
 
 export default function App() {
   const [userId, setUserId] = useState(() => localStorage.getItem('userId') || '');
   const [sessionRatings, setSessionRatings] = useState({});
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   
   // Recommendations and Shelves
   const [recommendations, setRecommendations] = useState([]);
@@ -201,12 +203,29 @@ export default function App() {
     if (userId) fetchRecommendations();
   };
 
+  const handleLogin = async (username) => {
+    localStorage.setItem('userId', username);
+    setUserId(username);
+    setSessionRatings({});
+    
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/api/users/${username}/ratings`);
+      if (res.ok) {
+        const data = await res.json();
+        setSessionRatings(data);
+      }
+    } catch (e) {
+      console.error("Failed to load user ratings", e);
+    }
+  };
+
   return (
     <div className="app-container">
       {/* Heavenly background glowing blobs */}
       <div className="glow-orb glow-orb-1"></div>
       <div className="glow-orb glow-orb-2"></div>
-      {/* Sidebar: Sliders, Session details, and Admin Add Movie */}
+      
+      {/* Sidebar 1: Sliders, Session details, and Admin Add Movie */}
       <SidebarSettings
         weightCol={weightCol}
         setWeightCol={setWeightCol}
@@ -219,19 +238,51 @@ export default function App() {
         onAddMovieSuccess={refreshCatalog}
       />
 
+      {/* Sidebar 2: Live Multiplayer Ratings Log Stream */}
+      <LiveFeed feed={feed} />
+
       {/* Main recommendation shelf space */}
       <main className="main-content">
-        {!userId ? (
-          <Onboarding onSubmit={handleOnboardingSubmit} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '20px' }}>
+          <div>
+            <h1>🎬 Personal Recommendations Portal</h1>
+            <p style={{ color: 'var(--text-secondary)' }}>
+              Real-time SVD matrix factorizer & content keyword TF-IDF ensembled engine.
+            </p>
+          </div>
+          <button 
+            className="btn-primary" 
+            style={{ 
+              background: userId ? '#25283c' : 'linear-gradient(135deg, var(--accent-indigo) 0%, #4338ca 100%)', 
+              fontSize: '0.85rem', 
+              padding: '10px 16px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+            onClick={() => userId ? handleResetSession() : setIsLoginModalOpen(true)}
+          >
+            {userId ? `Sign Out (${userId}) 🚪` : 'Sign In / Register 🔑'}
+          </button>
+        </div>
+
+        {/* Determine if onboarding is required for cold start */}
+        {!userId || (!userId.startsWith('User ') && Object.keys(sessionRatings).length === 0) ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', marginTop: '20px' }}>
+            {!userId && (
+              <p style={{ color: 'var(--text-secondary)', textAlign: 'center', maxWidth: '500px', fontSize: '0.85rem' }}>
+                Browse as a guest by filling out preferences below, or click <strong>Sign In</strong> in the top corner to load a demo or custom user profile.
+              </p>
+            )}
+            {userId && (
+              <p style={{ color: 'var(--text-secondary)', textAlign: 'center', maxWidth: '500px', fontSize: '0.85rem' }}>
+                Welcome, <strong>{userId}</strong>! Since you are a new user, please choose your interests to bootstrap your SVD latent vector.
+              </p>
+            )}
+            <Onboarding onSubmit={handleOnboardingSubmit} />
+          </div>
         ) : (
           <>
-            <div>
-              <h1>🎬 Personal Recommendations Dashboard</h1>
-              <p style={{ color: 'var(--text-secondary)' }}>
-                Powered by a real-time SVD matrix factorizer & content keyword TF-IDF ensembled engine.
-              </p>
-            </div>
-
             {/* Header statistics banner */}
             {stats && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px' }}>
@@ -328,8 +379,12 @@ export default function App() {
         )}
       </main>
 
-      {/* Live Multiplayer Ratings Log Stream (Right Sidebar) */}
-      <LiveFeed feed={feed} />
+      {/* Glassmorphic Auth Portal Modal Overlay */}
+      <LoginModal
+        isOpen={isLoginModalOpen}
+        onClose={() => setIsLoginModalOpen(false)}
+        onLogin={handleLogin}
+      />
     </div>
   );
 }
