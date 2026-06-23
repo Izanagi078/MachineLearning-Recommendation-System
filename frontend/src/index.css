@@ -87,27 +87,9 @@ body {
 /* Dashboard Layout */
 .app-container {
   display: grid;
-  grid-template-columns: 300px 320px 1fr;
+  grid-template-columns: 280px 1fr 300px;
   min-height: 100vh;
   position: relative;
-}
-
-@media (max-width: 1280px) {
-  .app-container {
-    grid-template-columns: 300px 1fr;
-  }
-  .live-feed-sidebar {
-    display: none;
-  }
-}
-
-@media (max-width: 960px) {
-  .app-container {
-    grid-template-columns: 1fr;
-  }
-  .settings-sidebar {
-    display: none;
-  }
 }
 
 /* Premium Glassmorphic Containers */
@@ -128,8 +110,10 @@ body {
   transform: translateY(-2px);
 }
 
-/* Sidebars */
+/* Sidebars and main content layout structure with explicit grid cells */
 .settings-sidebar {
+  grid-column: 1;
+  grid-row: 1;
   background: rgba(10, 11, 20, 0.55);
   backdrop-filter: blur(25px);
   -webkit-backdrop-filter: blur(25px);
@@ -142,11 +126,13 @@ body {
   z-index: 10;
 }
 
-.live-feed-sidebar {
+.right-sidebar {
+  grid-column: 3;
+  grid-row: 1;
   background: rgba(10, 11, 20, 0.55);
   backdrop-filter: blur(25px);
   -webkit-backdrop-filter: blur(25px);
-  border-right: 1px solid var(--border-color);
+  border-left: 1px solid var(--border-color);
   padding: 30px 24px;
   display: flex;
   flex-direction: column;
@@ -156,12 +142,53 @@ body {
 }
 
 .main-content {
+  grid-column: 2;
+  grid-row: 1;
   padding: 40px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 36px;
   z-index: 5;
+}
+
+/* Responsive Media Queries (placed after base layout styles to cascade properly) */
+@media (max-width: 1200px) {
+  .app-container {
+    grid-template-columns: 260px 1fr;
+  }
+  .right-sidebar {
+    grid-column: 1 / -1;
+    grid-row: auto;
+    border-left: none;
+    border-top: 1px solid var(--border-color);
+  }
+}
+
+@media (max-width: 768px) {
+  .app-container {
+    grid-template-columns: 1fr;
+    display: flex;
+    flex-direction: column;
+  }
+  .settings-sidebar {
+    grid-column: auto;
+    grid-row: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+    width: 100%;
+  }
+  .main-content {
+    grid-column: auto;
+    grid-row: auto;
+    width: 100%;
+  }
+  .right-sidebar {
+    grid-column: auto;
+    grid-row: auto;
+    border-top: 1px solid var(--border-color);
+    width: 100%;
+  }
 }
 
 /* Headers Typography */

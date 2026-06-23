@@ -10,9 +10,74 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from backend.app.database import engine, SessionLocal, get_db, Base
-from backend.app.models_db import DBMovie, DBRating
-from backend.app.schemas import OnboardingRequest, RatingCreate, MovieCreate
+from backend.app.models_db import DBMovie, DBRating, DBUser
+from backend.app.schemas import OnboardingRequest, RatingCreate, MovieCreate, UserAuth, TokenResponse
 from backend.src.models import CollaborativeModel, ContentModel, HybridRecommender
+import hmac
+import hashlib
+import base64
+import json
+import secrets
+
+SECRET_KEY = os.environ.get("JWT_SECRET", "super-secret-key-12345")
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_hex(16)
+    key = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
+    return f"{salt}${key.hex()}"
+
+def verify_password(password: str, hashed: str) -> bool:
+    try:
+        salt, key_hex = hashed.split("$")
+        key = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
+        return hmac.compare_digest(key.hex(), key_hex)
+    except Exception:
+        return False
+
+def generate_token(user_id: str) -> str:
+    payload = {
+        "sub": user_id,
+        "exp": int(time.time()) + 86400 * 7  # 7 days validity
+    }
+    payload_b64 = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    sig = hmac.new(SECRET_KEY.encode(), payload_b64.encode(), hashlib.sha256).digest()
+    sig_b64 = base64.urlsafe_b64encode(sig).decode().rstrip("=")
+    return f"{payload_b64}.{sig_b64}"
+
+def verify_token(token: str) -> Optional[str]:
+    try:
+        parts = token.split(".")
+        if len(parts) != 2:
+            return None
+        payload_b64, sig_b64 = parts[0], parts[1]
+        
+        pad = len(payload_b64) % 4
+        payload_b64_padded = payload_b64 + ("=" * (4 - pad) if pad else "")
+        payload_bytes = base64.urlsafe_b64decode(payload_b64_padded)
+        payload = json.loads(payload_bytes.decode())
+        
+        if payload.get("exp", 0) < time.time():
+            return None
+            
+        expected_sig = hmac.new(SECRET_KEY.encode(), payload_b64.encode(), hashlib.sha256).digest()
+        expected_sig_b64 = base64.urlsafe_b64encode(expected_sig).decode().rstrip("=")
+        
+        if hmac.compare_digest(sig_b64, expected_sig_b64):
+            return payload.get("sub")
+    except Exception:
+        return None
+    return None
+
+def get_current_user_optional(authorization: Optional[str] = Header(None)) -> Optional[str]:
+    if not authorization:
+        return None
+    try:
+        if authorization.startswith("Bearer "):
+            token = authorization.split(" ")[1]
+            return verify_token(token)
+    except Exception:
+        return None
+    return None
 
 # Initialize FastAPI App
 app = FastAPI(
@@ -137,6 +202,48 @@ def startup_event():
 
 # API Routes
 
+@app.post("/api/auth/register", response_model=TokenResponse)
+def register(auth: UserAuth, db: Session = Depends(get_db)):
+    username = auth.username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="Username cannot be empty.")
+    if len(auth.password) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters long.")
+    
+    existing = db.query(DBUser).filter(DBUser.username == username).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Username already exists.")
+        
+    hashed = hash_password(auth.password)
+    new_user = DBUser(username=username, hashed_password=hashed)
+    db.add(new_user)
+    db.commit()
+    
+    token = generate_token(username)
+    return {"token": token, "username": username}
+
+@app.post("/api/auth/login", response_model=TokenResponse)
+def login(auth: UserAuth, db: Session = Depends(get_db)):
+    username = auth.username.strip()
+    user = db.query(DBUser).filter(DBUser.username == username).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid username or password.")
+        
+    if not verify_password(auth.password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="Invalid username or password.")
+        
+    token = generate_token(username)
+    return {"token": token, "username": username}
+
+@app.post("/api/auth/demo", response_model=TokenResponse)
+def login_demo(auth: UserAuth):
+    username = auth.username.strip()
+    if not username.startswith("User ") and not username.startswith("guest_"):
+        raise HTTPException(status_code=400, detail="Not a valid demo or guest username.")
+    
+    token = generate_token(username)
+    return {"token": token, "username": username}
+
 @app.get("/api/stats")
 def get_stats(db: Session = Depends(get_db)):
     """
@@ -190,30 +297,32 @@ def search_movies(query: str, limit: int = 10):
 @app.post("/api/onboarding")
 def user_onboarding(req: OnboardingRequest, db: Session = Depends(get_db)):
     """
-    Handles guest onboarding by matching queries using TF-IDF Content NLP,
-    generating a guest UUID, and recording initial mock likes to database.
+    Handles onboarding by matching genres/keywords via TF-IDF, seeding initial
+    ratings to bootstrap the SVD profile. If the caller is already a registered
+    user (passes req.userId), ratings are seeded under that account so their
+    session is never overwritten by a new guest ID.
     """
-    # 1. Generate new Guest User ID
-    guest_id = f"guest_{uuid.uuid4().hex[:8]}"
-    
+    # 1. Use caller's existing userId if provided, else create a new guest ID
+    effective_user_id = req.userId.strip() if req.userId else f"guest_{uuid.uuid4().hex[:8]}"
+
     # 2. Match movies based on genres & keywords
     combined_query = " ".join(req.genres) + " " + req.keywords
     combined_query = combined_query.strip().lower()
-    
+
     if not combined_query:
         raise HTTPException(status_code=400, detail="Must provide at least one genre or keyword")
-        
+
     # Transform and check similarities
     query_vector = app.state.content_model.vectorizer.transform([combined_query])
     active_movies = app.state.movies_df[app.state.movies_df['is_active'] == True]
-    
+
     # Cosine similarities
     sims = np.dot(app.state.content_model.tfidf_matrix.toarray(), query_vector.toarray().T).flatten()
-    
+
     # Map index to movie id and get top matches
     sorted_indices = np.argsort(sims)[::-1]
     top_movie_ids = []
-    
+
     for idx in sorted_indices:
         mid = app.state.content_model.movie_idx_to_id[idx]
         movie_row = active_movies[active_movies['movieId'] == mid]
@@ -221,34 +330,31 @@ def user_onboarding(req: OnboardingRequest, db: Session = Depends(get_db)):
             top_movie_ids.append(int(mid))
             if len(top_movie_ids) >= 5:
                 break
-                
-    # 3. Insert mock 5.0 ratings for top matches to boot user profile in SVD
+
+    # 3. Insert 5.0 seed ratings under effective_user_id to bootstrap SVD profile
     timestamp = int(time.time())
     new_ratings_list = []
-    
+
     for mid in top_movie_ids:
-        # Write to SQLite
-        rating_obj = DBRating(userId=guest_id, movieId=mid, rating=5.0, timestamp=timestamp)
+        rating_obj = DBRating(userId=effective_user_id, movieId=mid, rating=5.0, timestamp=timestamp)
         db.add(rating_obj)
-        
-        # Update RAM model
-        app.state.col_model.update_rating_online(guest_id, mid, 5.0)
-        
+
+        app.state.col_model.update_rating_online(effective_user_id, mid, 5.0)
+
         new_ratings_list.append({
-            'userId': guest_id,
+            'userId': effective_user_id,
             'movieId': mid,
             'rating': 5.0,
             'timestamp': timestamp
         })
-        
+
     db.commit()
-    
-    # Concatenate in-memory DataFrame
+
     new_ratings_df = pd.DataFrame(new_ratings_list)
     app.state.ratings_df = pd.concat([app.state.ratings_df, new_ratings_df], ignore_index=True)
-    
+
     return {
-        "userId": guest_id,
+        "userId": effective_user_id,
         "matched_movies": active_movies[active_movies['movieId'].isin(top_movie_ids)].to_dict(orient="records")
     }
 
@@ -258,11 +364,17 @@ def get_recommendations(
     weight_collaborative: float = 0.5,
     novelty_weight: float = 0.0,
     diversity_weight: float = 0.2,
-    top_n: int = 10
+    top_n: int = 10,
+    current_user: Optional[str] = Depends(get_current_user_optional)
 ):
     """
     Fetches personalized hybrid recommendations with explanation details.
     """
+    # Enforce auth verification for non-guest sessions
+    if not userId.startswith("guest_"):
+        if not current_user or current_user != userId:
+            raise HTTPException(status_code=401, detail="Unauthorized: Invalid or missing token.")
+
     recs = app.state.hybrid_recommender.get_recommendations(
         user_id=userId,
         movies_df=app.state.movies_df,
@@ -292,10 +404,19 @@ def get_recommendations(
     return response_list
 
 @app.post("/api/ratings")
-def submit_rating(rating: RatingCreate, db: Session = Depends(get_db)):
+def submit_rating(
+    rating: RatingCreate, 
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(get_current_user_optional)
+):
     """
     Saves a rating (like/dislike) and updates the in-memory SVD coordinates immediately.
     """
+    # Enforce auth verification for non-guest ratings
+    if not rating.userId.startswith("guest_"):
+        if not current_user or current_user != rating.userId:
+            raise HTTPException(status_code=401, detail="Unauthorized: Invalid or missing token.")
+
     timestamp = int(time.time())
     
     # 1. Insert into SQLite
@@ -353,10 +474,17 @@ def get_global_feed(db: Session = Depends(get_db), limit: int = 10):
     return feed
 
 @app.post("/api/movies")
-def add_movie(movie: MovieCreate, db: Session = Depends(get_db)):
+def add_movie(
+    movie: MovieCreate, 
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(get_current_user_optional)
+):
     """
     Admin Route: Dynamically adds a new movie to catalog and indexes it in SVD and TF-IDF.
     """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Unauthorized: A valid auth token is required to modify catalog.")
+
     # Create new ID
     max_id = db.query(DBMovie).order_by(DBMovie.movieId.desc()).first()
     new_movie_id = (max_id.movieId + 1) if max_id else 1
@@ -394,12 +522,19 @@ def add_movie(movie: MovieCreate, db: Session = Depends(get_db)):
     app.state.movies_df = pd.concat([app.state.movies_df, new_row], ignore_index=True)
     
     return db_movie
-
+ 
 @app.delete("/api/movies/{movieId}")
-def delete_movie(movieId: int, db: Session = Depends(get_db)):
+def delete_movie(
+    movieId: int, 
+    db: Session = Depends(get_db),
+    current_user: Optional[str] = Depends(get_current_user_optional)
+):
     """
     Admin Route: Soft deletes a movie (marks inactive), removing it from recommendations list.
     """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Unauthorized: A valid auth token is required to modify catalog.")
+
     db_movie = db.query(DBMovie).filter(DBMovie.movieId == movieId).first()
     if not db_movie:
         raise HTTPException(status_code=404, detail="Movie not found")

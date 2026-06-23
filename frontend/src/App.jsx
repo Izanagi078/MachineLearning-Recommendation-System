@@ -102,8 +102,14 @@ export default function App() {
     setIsLoading(true);
     setErrorMsg('');
     try {
+      const token = localStorage.getItem('token');
+      const headers = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
       const res = await fetch(
-        `http://127.0.0.1:8000/api/recommendations?userId=${userId}&weight_collaborative=${weightCol}&novelty_weight=${novelty}&diversity_weight=${diversity}&top_n=10`
+        `http://127.0.0.1:8000/api/recommendations?userId=${userId}&weight_collaborative=${weightCol}&novelty_weight=${novelty}&diversity_weight=${diversity}&top_n=10`,
+        { headers }
       );
       if (res.ok) {
         const data = await res.json();
@@ -139,9 +145,14 @@ export default function App() {
     if (!userId) return;
 
     try {
+      const token = localStorage.getItem('token');
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
       const res = await fetch('http://127.0.0.1:8000/api/ratings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ userId, movieId, rating })
       });
 
@@ -164,8 +175,14 @@ export default function App() {
 
   const handleDeleteMovie = async (movieId) => {
     try {
+      const token = localStorage.getItem('token');
+      const headers = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
       const res = await fetch(`http://127.0.0.1:8000/api/movies/${movieId}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers
       });
 
       if (res.ok) {
@@ -183,6 +200,7 @@ export default function App() {
 
   const handleResetSession = () => {
     localStorage.removeItem('userId');
+    localStorage.removeItem('token');
     setUserId('');
     setSessionRatings({});
     setRecommendations([]);
@@ -190,10 +208,15 @@ export default function App() {
     setSearchQuery('');
   };
 
-  const handleOnboardingSubmit = (newUserId) => {
-    localStorage.setItem('userId', newUserId);
-    setUserId(newUserId);
-    setSessionRatings({}); // reset rating indicators for new guest session
+  const handleOnboardingSubmit = (returnedUserId) => {
+    // If already logged in (registered user), keep that session — onboarding
+    // was only seeding ratings under the existing account.
+    // Only adopt a new guest ID if there was no prior session.
+    if (!userId) {
+      localStorage.setItem('userId', returnedUserId);
+      setUserId(returnedUserId);
+    }
+    setSessionRatings({}); // reset session rating indicators
   };
 
   // Refresh catalogs
@@ -203,13 +226,18 @@ export default function App() {
     if (userId) fetchRecommendations();
   };
 
-  const handleLogin = async (username) => {
+  const handleLogin = async (username, token) => {
     localStorage.setItem('userId', username);
+    localStorage.setItem('token', token);
     setUserId(username);
     setSessionRatings({});
     
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/users/${username}/ratings`);
+      const headers = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      const res = await fetch(`http://127.0.0.1:8000/api/users/${username}/ratings`, { headers });
       if (res.ok) {
         const data = await res.json();
         setSessionRatings(data);
@@ -238,32 +266,13 @@ export default function App() {
         onAddMovieSuccess={refreshCatalog}
       />
 
-      {/* Sidebar 2: Live Multiplayer Ratings Log Stream */}
-      <LiveFeed feed={feed} />
-
-      {/* Main recommendation shelf space */}
+      {/* Main recommendation shelf space (Col 2 - Center) */}
       <main className="main-content">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '20px' }}>
-          <div>
-            <h1>🎬 Personal Recommendations Portal</h1>
-            <p style={{ color: 'var(--text-secondary)' }}>
-              Real-time SVD matrix factorizer & content keyword TF-IDF ensembled engine.
-            </p>
-          </div>
-          <button 
-            className="btn-primary" 
-            style={{ 
-              background: userId ? '#25283c' : 'linear-gradient(135deg, var(--accent-indigo) 0%, #4338ca 100%)', 
-              fontSize: '0.85rem', 
-              padding: '10px 16px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px'
-            }}
-            onClick={() => userId ? handleResetSession() : setIsLoginModalOpen(true)}
-          >
-            {userId ? `Sign Out (${userId}) 🚪` : 'Sign In / Register 🔑'}
-          </button>
+        <div>
+          <h1>🎬 Personal Recommendations Portal</h1>
+          <p style={{ color: 'var(--text-secondary)' }}>
+            Real-time SVD matrix factorizer & content keyword TF-IDF ensembled engine.
+          </p>
         </div>
 
         {/* Determine if onboarding is required for cold start */}
@@ -271,7 +280,7 @@ export default function App() {
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', marginTop: '20px' }}>
             {!userId && (
               <p style={{ color: 'var(--text-secondary)', textAlign: 'center', maxWidth: '500px', fontSize: '0.85rem' }}>
-                Browse as a guest by filling out preferences below, or click <strong>Sign In</strong> in the top corner to load a demo or custom user profile.
+                Browse as a guest by filling out preferences below, or use the <strong>Session Profile</strong> on the right to sign in or load demo data.
               </p>
             )}
             {userId && (
@@ -279,7 +288,7 @@ export default function App() {
                 Welcome, <strong>{userId}</strong>! Since you are a new user, please choose your interests to bootstrap your SVD latent vector.
               </p>
             )}
-            <Onboarding onSubmit={handleOnboardingSubmit} />
+            <Onboarding onSubmit={handleOnboardingSubmit} currentUserId={userId} />
           </div>
         ) : (
           <>
@@ -378,6 +387,36 @@ export default function App() {
           </>
         )}
       </main>
+
+      {/* Sidebar 2: Right Sidebar (Col 3) containing Profile Widget + Network Stream */}
+      <aside className="right-sidebar">
+        {/* User Session Profile widget ("sign up thing") */}
+        <div className="glass-card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
+          <h4 style={{ fontSize: '0.85rem', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>👤 Session Profile</h4>
+          {userId ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <p style={{ fontSize: '0.8rem', wordBreak: 'break-all' }}>
+                ID: <code style={{ color: 'var(--accent-emerald)', fontWeight: 'bold' }}>{userId}</code>
+              </p>
+              <button className="btn-primary" style={{ padding: '6px', fontSize: '0.8rem', background: '#25283c' }} onClick={handleResetSession}>
+                Sign Out 🚪
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                Browsing as Guest
+              </p>
+              <button className="btn-primary" style={{ padding: '6px', fontSize: '0.8rem' }} onClick={() => setIsLoginModalOpen(true)}>
+                Sign In / Register 🔑
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Live Network Stream */}
+        <LiveFeed feed={feed} />
+      </aside>
 
       {/* Glassmorphic Auth Portal Modal Overlay */}
       <LoginModal

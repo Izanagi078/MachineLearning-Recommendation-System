@@ -4,6 +4,7 @@ from typing import List, Optional
 class OnboardingRequest(BaseModel):
     genres: List[str]
     keywords: str
+    userId: Optional[str] = None  # if provided, seed ratings under this account
 
 class RatingCreate(BaseModel):
     userId: str
@@ -13,3 +14,11 @@ class RatingCreate(BaseModel):
 class MovieCreate(BaseModel):
     title: str
     genres: str
+
+class UserAuth(BaseModel):
+    username: str
+    password: str
+
+class TokenResponse(BaseModel):
+    token: str
+    username: str

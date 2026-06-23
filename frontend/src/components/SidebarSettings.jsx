@@ -28,9 +28,14 @@ export default function SidebarSettings({
     setStatusMsg('');
 
     try {
+      const token = localStorage.getItem('token');
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
       const response = await fetch('http://127.0.0.1:8000/api/movies', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ title, genres })
       });
 
@@ -113,18 +118,8 @@ export default function SidebarSettings({
         </p>
       </div>
 
-      <div className="glass-card" style={{ padding: '14px', marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        <h4 style={{ fontSize: '0.85rem', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>👤 Session Profile</h4>
-        <p style={{ fontSize: '0.8rem', wordBreak: 'break-all' }}>
-          ID: <code style={{ color: '#f43f5e' }}>{userId || 'None'}</code>
-        </p>
-        <button className="btn-primary" style={{ padding: '6px', fontSize: '0.8rem', background: '#25283c' }} onClick={onReset}>
-          Reset Session 🔄
-        </button>
-      </div>
-
       {/* Admin catalog panel */}
-      <div className="glass-card" style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      <div className="glass-card" style={{ padding: '14px', marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' }}>
         <h4 
           style={{ fontSize: '0.85rem', textTransform: 'uppercase', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', justifyContent: 'between', alignItems: 'center' }}
           onClick={() => setIsAdminOpen(!isAdminOpen)}

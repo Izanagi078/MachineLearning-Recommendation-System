@@ -4,3 +4,17 @@ __pycache__/
 data/
 *.pkl
 .streamlit/
+
+# Prevent committing screenshots or recordings
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.mp4
+*.webm
+*.mov
+*.webp
+*screenshot*
+*layout_check*
+*dashboard*

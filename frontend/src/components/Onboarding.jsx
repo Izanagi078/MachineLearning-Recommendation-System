@@ -6,7 +6,7 @@ const AVAILABLE_GENRES = [
   'Sci-Fi', 'Thriller', 'Western'
 ];
 
-export default function Onboarding({ onSubmit }) {
+export default function Onboarding({ onSubmit, currentUserId }) {
   const [selectedGenres, setSelectedGenres] = useState([]);
   const [keywords, setKeywords] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -35,7 +35,8 @@ export default function Onboarding({ onSubmit }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           genres: selectedGenres,
-          keywords: keywords.trim()
+          keywords: keywords.trim(),
+          userId: currentUserId || null  // pass existing account ID if logged in
         })
       });
 

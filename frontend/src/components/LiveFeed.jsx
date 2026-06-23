@@ -7,7 +7,7 @@ export default function LiveFeed({ feed }) {
   };
 
   return (
-    <aside className="live-feed-sidebar">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', flex: 1, overflowY: 'auto' }}>
       <div>
         <h2 style={{ fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
           📡 Network Stream
@@ -57,6 +57,6 @@ export default function LiveFeed({ feed }) {
           })
         )}
       </div>
-    </aside>
+    </div>
   );
 }

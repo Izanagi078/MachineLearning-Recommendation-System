@@ -3,31 +3,69 @@ import React, { useState } from 'react';
 const DEMO_USERS = ['User 10', 'User 50', 'User 100', 'User 200', 'User 300'];
 
 export default function LoginModal({ isOpen, onClose, onLogin }) {
+  const [mode, setMode] = useState('login'); // 'login' or 'register'
   const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [selectedDemo, setSelectedDemo] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setLoading(true);
 
-    let finalUser = '';
-    if (selectedDemo) {
-      finalUser = selectedDemo;
-    } else if (username.trim()) {
-      // Clean custom username
-      finalUser = username.trim();
-    } else {
-      setError('Please select a demo user or enter a custom username.');
-      return;
+    try {
+      if (selectedDemo) {
+        // Demo mode (passwordless bypass token request)
+        const response = await fetch('http://127.0.0.1:8000/api/auth/demo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: selectedDemo, password: '' })
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          onLogin(data.username, data.token);
+          setSelectedDemo('');
+          onClose();
+        } else {
+          const errData = await response.json();
+          setError(errData.detail || 'Demo login failed.');
+        }
+      } else {
+        // Custom Auth mode
+        if (!username.trim() || !password) {
+          setError('Please fill in both username and password.');
+          setLoading(false);
+          return;
+        }
+
+        const endpoint = mode === 'login' ? 'login' : 'register';
+        const response = await fetch(`http://127.0.0.1:8000/api/auth/${endpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: username.trim(), password })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          onLogin(data.username, data.token);
+          setUsername('');
+          setPassword('');
+          onClose();
+        } else {
+          const errData = await response.json();
+          setError(errData.detail || `${mode === 'login' ? 'Login' : 'Registration'} failed.`);
+        }
+      }
+    } catch (err) {
+      setError('Cannot connect to authorization server.');
+    } finally {
+      setLoading(false);
     }
-
-    onLogin(finalUser);
-    setUsername('');
-    setSelectedDemo('');
-    onClose();
   };
 
   return (
@@ -37,8 +75,8 @@ export default function LoginModal({ isOpen, onClose, onLogin }) {
       left: 0,
       right: 0,
       bottom: 0,
-      backgroundColor: 'rgba(0, 0, 0, 0.75)',
-      backdropFilter: 'blur(12px)',
+      backgroundColor: 'rgba(0, 0, 0, 0.8)',
+      backdropFilter: 'blur(16px)',
       display: 'flex',
       justifyContent: 'center',
       alignItems: 'center',
@@ -47,13 +85,14 @@ export default function LoginModal({ isOpen, onClose, onLogin }) {
     }}>
       <div className="glass-card" style={{
         width: '100%',
-        maxWidth: '400px',
-        border: '1px solid rgba(99, 102, 241, 0.2)',
-        boxShadow: '0 30px 60px rgba(0,0,0,0.8), 0 0 30px rgba(99, 102, 241, 0.1)',
+        maxWidth: '420px',
+        border: '1px solid rgba(99, 102, 241, 0.25)',
+        boxShadow: '0 30px 60px rgba(0,0,0,0.8), 0 0 40px rgba(99, 102, 241, 0.12)',
         display: 'flex',
         flexDirection: 'column',
         gap: '20px',
-        position: 'relative'
+        position: 'relative',
+        padding: '30px'
       }}>
         <button
           onClick={onClose}
@@ -71,23 +110,58 @@ export default function LoginModal({ isOpen, onClose, onLogin }) {
         </button>
 
         <div style={{ textAlign: 'center', marginBottom: '4px' }}>
-          <h2 style={{ fontSize: '1.4rem', marginBottom: '6px' }}>🔑 Portal Authentication</h2>
+          <h2 style={{ fontSize: '1.4rem', marginBottom: '6px' }}>🔑 Recommender Auth Portal</h2>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-            Log in to retrieve history or test pre-trained profiles
+            Authenticate to sync offline latent updates and store preferences
           </p>
         </div>
+
+        {/* Tab Selection */}
+        {!selectedDemo && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', padding: '2px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
+            <button
+              onClick={() => { setMode('login'); setError(''); }}
+              style={{
+                padding: '8px',
+                fontSize: '0.85rem',
+                borderRadius: '6px',
+                background: mode === 'login' ? 'var(--accent-indigo)' : 'transparent',
+                color: 'white',
+                boxShadow: 'none'
+              }}
+            >
+              Sign In
+            </button>
+            <button
+              onClick={() => { setMode('register'); setError(''); }}
+              style={{
+                padding: '8px',
+                fontSize: '0.85rem',
+                borderRadius: '6px',
+                background: mode === 'register' ? 'var(--accent-indigo)' : 'transparent',
+                color: 'white',
+                boxShadow: 'none'
+              }}
+            >
+              Register
+            </button>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {/* Option 1: Demo dropdown */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '600' }}>
-              Select Pre-Trained Demo User:
+              Select Pre-Trained Demo Profile:
             </label>
             <select
               value={selectedDemo}
               onChange={(e) => {
                 setSelectedDemo(e.target.value);
-                if (e.target.value) setUsername(''); // clear custom
+                if (e.target.value) {
+                  setUsername('');
+                  setPassword('');
+                }
               }}
               style={{
                 width: '100%',
@@ -101,54 +175,80 @@ export default function LoginModal({ isOpen, onClose, onLogin }) {
                 outline: 'none'
               }}
             >
-              <option value="">-- Choose Profile --</option>
+              <option value="">-- Choose Profile (Passwordless) --</option>
               {DEMO_USERS.map((u) => (
                 <option key={u} value={u}>{u}</option>
               ))}
             </select>
           </div>
 
-          <div style={{ textAlign: 'center', fontSize: '0.75rem', color: 'rgba(255,255,255,0.15)', fontWeight: 'bold' }}>
-            — OR —
-          </div>
+          {!selectedDemo && (
+            <>
+              <div style={{ textAlign: 'center', fontSize: '0.75rem', color: 'rgba(255,255,255,0.15)', fontWeight: 'bold' }}>
+                — OR CUSTOM ACCOUNT —
+              </div>
 
-          {/* Option 2: Custom Text Input */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '600' }}>
-              Enter Custom Username:
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. john_doe"
-              value={username}
-              onChange={(e) => {
-                setUsername(e.target.value);
-                if (e.target.value) setSelectedDemo(''); // clear dropdown
-              }}
-              style={{
-                width: '100%',
-                padding: '10px',
-                borderRadius: '6px',
-                border: '1px solid var(--border-color)',
-                background: 'rgba(0,0,0,0.3)',
-                color: 'white',
-                fontFamily: 'var(--font-family)',
-                fontSize: '0.85rem',
-                outline: 'none'
-              }}
-            />
-          </div>
+              {/* Username Input */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '600' }}>
+                  Username:
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. movie_fan"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border-color)',
+                    background: 'rgba(0,0,0,0.3)',
+                    color: 'white',
+                    fontFamily: 'var(--font-family)',
+                    fontSize: '0.85rem',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+
+              {/* Password Input */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '600' }}>
+                  Password:
+                </label>
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border-color)',
+                    background: 'rgba(0,0,0,0.3)',
+                    color: 'white',
+                    fontFamily: 'var(--font-family)',
+                    fontSize: '0.85rem',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+            </>
+          )}
 
           {error && (
-            <p style={{ color: 'var(--accent-rose)', fontSize: '0.75rem', textAlign: 'center' }}>{error}</p>
+            <p style={{ color: 'var(--accent-rose)', fontSize: '0.75rem', textAlign: 'center', wordBreak: 'break-word' }}>{error}</p>
           )}
 
           <button
             type="submit"
             className="btn-primary"
-            style={{ width: '100%', padding: '12px', fontSize: '0.9rem', marginTop: '6px' }}
+            disabled={loading}
+            style={{ width: '100%', padding: '12px', fontSize: '0.9rem', marginTop: '6px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
           >
-            Confirm & Load Profile 🔓
+            {loading ? 'Processing...' : selectedDemo ? 'Load Demo Profile 🔓' : mode === 'login' ? 'Sign In 🔑' : 'Create Account 🚀'}
           </button>
         </form>
       </div>
