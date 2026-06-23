@@ -1,84 +1,109 @@
-# Project Walkthrough: Hybrid Movie Recommender Engine
+# Project Walkthrough: Production Recommender System (FastAPI + React)
 
-This document details the completed implementation of the **Hybrid Movie Recommendation Engine** with dynamic cold-start resolution, collaborative matrix factorization, content-based NLP, and explainable AI insights.
+This document details the completed implementation of the production-grade **Hybrid Movie Recommendation Engine** with a decoupled backend and frontend architecture.
 
 ---
 
 ## 🎬 Architecture & Completed Components
 
-We built a modular, production-grade recommendation pipeline under `movie_recommender_ml/`:
+We transitioned the project from a monolithic Streamlit layout to a distributed **FastAPI Backend + SQLite Database + React Frontend** system:
 
-1.  **Data Loader & Corpus Augmentation**:
-    *   [data_loader.py](file:///c:/Users/Lenovo/OneDrive/Desktop/Machine%20Learning/movie_recommender_ml/src/data_loader.py): Automatically downloads, extracts, and parses the GroupLens `ml-latest-small` dataset. Joins ratings, movies, and user-generated tag datasets, building normalized movie content documents (Title + Genres + Tags) for NLP vectorization.
-2.  **Collaborative Filtering (SVD)**:
-    *   [models.py](file:///c:/Users/Lenovo/OneDrive/Desktop/Machine%20Learning/movie_recommender_ml/src/models.py): Implements **User-Mean Centered Matrix Factorization** via `TruncatedSVD`. Centering ensures predictions are anchored to individual user rating ranges. Integrates **Temporal Decay Weighting** ($e^{-\lambda t}$) to prioritize recency.
-3.  **Content-Based NLP Vector Space**:
-    *   [models.py](file:///c:/Users/Lenovo/OneDrive/Desktop/Machine%20Learning/movie_recommender_ml/src/models.py): Converts movie text profiles to numerical TF-IDF vectors using `TfidfVectorizer` (English stopwords and sublinear TF scaling). Recommends movies by calculating cosine similarities against active user profile vectors.
-4.  **Advanced Hybrid Recommender Coordinate**:
-    *   [models.py](file:///c:/Users/Lenovo/OneDrive/Desktop/Machine%20Learning/movie_recommender_ml/src/models.py): Ensembles SVD and TF-IDF scores. Features:
-        *   **Explainable AI (XAI)**: Generates detailed explanation blocks explaining *why* a movie is recommended (identifying closest latent-space SVD likes or overlapping TF-IDF terms).
-        *   **Greedy Genre Diversification**: Re-ranks predictions to penalize genre overlap, ensuring a diverse recommended set.
-        *   **Novelty Bias**: Attenuates scores of globally popular blockbusters to highlight hidden gems.
-        *   **Active Session Queue**: Real-time profile updates. If a user likes/dislikes a movie, the dashboard immediately adjusts their TF-IDF profile vector and reorders recommendations.
-5.  **Rigorous Evaluation Engine**:
-    *   [evaluation.py](file:///c:/Users/Lenovo/OneDrive/Desktop/Machine%20Learning/movie_recommender_ml/src/evaluation.py): Calculates **RMSE, MAE, MAP@10, and NDCG@10** on train-test splits.
-6.  **Interactive Dashboard & Onboarding**:
-    *   [dashboard.py](file:///c:/Users/Lenovo/OneDrive/Desktop/Machine%20Learning/movie_recommender_ml/app/dashboard.py): Streamlit dashboard with a customizable sidebar (user select, collaborative weight, novelty bias, diversity bias), a Netflix-style UI cards grid (using HTML/CSS fallbacks), and a **New User Onboarding** form that dynamically resolves cold-start profiles.
-7.  **Automated Test Suite**:
-    *   [test_pipeline.py](file:///c:/Users/Lenovo/OneDrive/Desktop/Machine%20Learning/movie_recommender_ml/test_pipeline.py): Runs automated integration and mathematical checks across all modules.
+### 1. Backend API (`backend/`)
+* **FastAPI Service (`backend/app/main.py`)**: Serves recommendations, logs clicks, performs online learning updates, and acts as the central orchestrator.
+* **SQLite Persistence (`backend/app/database.py`, `backend/app/models_db.py`)**: Stores live user interaction logs and catalog modifications. Ensures data is persistent across server restarts.
+* **Online SGD Matrix Factorization (`backend/src/models.py`)**: Exposes latent User ($P$) and Item ($Q$) matrices. When a user rates a movie, it runs a real-time Stochastic Gradient Descent step in memory to update coordinates:
+  $$P_u \leftarrow P_u + \gamma \cdot (e_{ui} \cdot Q_i - \lambda \cdot P_u)$$
+  $$Q_i \leftarrow Q_i + \gamma \cdot (e_{ui} \cdot P_u - \lambda \cdot Q_i)$$
+
+### 2. Frontend Application (`frontend/`)
+* **Vite + React Template**: Replaces Streamlit with a highly performant, responsive React app.
+* **Settings Control Center (`SidebarSettings.jsx`)**: Real-time sliders to tune Collaborative weight, Novelty penalty, and Genre diversity penalty.
+* **Onboarding Module (`Onboarding.jsx`)**: Cold-start resolver mapping queries through Content TF-IDF similarities to bootstrap guest profiles.
+* **Global Activity Feed (`LiveFeed.jsx`)**: Live sidebar component polling the backend SQLite logs every 5 seconds to display updates from *all* active user sessions.
+* **Diagnostics Dashboard (`VisualCharts.jsx`)**: SVG line plots displaying SVD explained variance and an animated coordinate equalizer showing latent user coordinate shifts.
+* **Dynamic Catalog Manager**: Admin panel to add new movies (dynamically vectorizing text and expanding SVD matrices in RAM) and soft-delete/hide movies.
 
 ---
 
-## 📈 Evaluation & Test Results
+## 📈 Integration & API Test Results
 
-The training pipeline and automated tests compile successfully. Here is the console output from the train and validation run:
+We ran automated integration tests covering the database operations, online SGD learning updates, and API endpoint routing.
 
+### API Integration Test Output (`backend/test_api.py`):
 ```text
-=== TRAINING AND VALIDATION PIPELINE RESULTS ===
+=== RUNNING API ENDPOINT TESTS ===
 
-[train] Loading dataset...
-[data_loader] Dataset already exists locally. Skipping download.
-[data_loader] Loaded 100836 ratings, 9742 movies.
+1. Testing GET /api/stats...
+[OK] Stats check passed. Total Ratings: 100836, RMSE: 0.9366
 
---- Model Validation (80/20 Split) ---
-[CollaborativeModel] Trained SVD with 50 factors. Matrix shape: (610, 8983)
+2. Testing POST /api/onboarding...
+[OK] Onboarding passed. Generated Guest User ID: guest_8a2d131f
+     Matched Movies: ['Back to the Future (1985)', 'Star Wars: Episode IV - A New Hope (1977)', 'Terminator 2: Judgment Day (1991)', 'Matrix, The (1999)', 'Interstellar (2014)']
+
+3. Testing GET /api/recommendations...
+[OK] Recommendations passed. Received 10 personalized items.
+
+4. Testing POST /api/ratings (Online SGD step)...
+[OK] Rating submission processed successfully.
+
+5. Testing GET /api/feed (Network Feed)...
+[OK] Global network feed verified. Last action: User guest_8a2d131f rated movie 1270 (Back to the Future (1985)).
+
+=== ALL FastAPI ENDPOINT INTEGRATION TESTS PASSED ===
+```
+
+### Core Pipeline Test Output (`test_pipeline.py`):
+```text
+=== STARTING AUTOMATED PIPELINE TESTS ===
+
+1. Testing Ingestion and Data Loading...
+[OK] Ingestion passed. Loaded 100836 ratings, 9742 movies.
+
+2. Testing Collaborative Model (SVD)...
+[CollaborativeModel] Trained SVD. P shape: (346, 10), Q shape: (786, 10)
+[OK] SVD collaborative fitting passed. Predict sample rating: 3.83
+
+3. Testing Content-Based Model (TF-IDF)...
 [ContentModel] Fitted TF-IDF matrix of shape (9742, 9947)
+[OK] TF-IDF content fitting passed. Vocabulary size: 9947
 
-[train] Calculating accuracy error metrics on test set...
-  Collaborative SVD Test RMSE: 0.9366
-  Collaborative SVD Test MAE:  0.7257
+4. Testing Evaluation Metrics Math...
+[OK] Accuracy (RMSE) and Ranking (MAP, NDCG) math checked successfully.
 
-[train] Evaluating ranking performance (MAP@10, NDCG@10) on sampled test users...
-  Hybrid System MAP@10:       1.67%
-  Hybrid System NDCG@10:      2.83%
-  Hybrid System Precision@10: 1.60%
-  Hybrid System Recall@10:    2.54%
+5. Testing Hybrid Recommender Assembly...
+[OK] Hybrid Recommender recommendations retrieved successfully.
 
---- Training Final Models on Full Dataset ---
-[CollaborativeModel] Trained SVD with 50 factors. Matrix shape: (610, 9724)
-[ContentModel] Fitted TF-IDF matrix of shape (9742, 9947)
+6. Testing Online SVD SGD Updates...
+[OK] Online SVD SGD rating updates shift latent vectors successfully.
 
---- Serializing Models & Caching Datasets ---
-[train] Successfully saved SVD model, TF-IDF model, and datasets to movie_recommender_ml/models
+=== ALL PIPELINE TESTS PASSED SUCCESSFULLY ===
 ```
 
 ---
 
-## 🎨 Visual Verification & Live Demo
+## 🚀 Running the Project
 
-Below are the screenshots of the visual dashboard rendering:
+### 1. Install Dependencies
+```bash
+# Backend
+cd backend
+pip install -r requirements.txt
 
-### 1. Main Dashboard Header & Metrics
-Displays the ensembled model performance metrics and sidebar controls:
+# Frontend
+cd ../frontend
+npm install
+```
 
-![Dashboard Metrics](./assets/dashboard_recommender_results_1782202882656.png)
+### 2. Start the Backend API Server
+```bash
+cd backend
+python run.py
+# Server starts on http://127.0.0.1:8000
+```
 
-### 2. New User Onboarding & Recommendations Shelf
-Features the custom CSS gradient fallback cards and interactive likes queue to resolve cold-start states:
-
-![Recommendations Shelf](./assets/dashboard_recommendations_shelf_1782202896757.png)
-
-### 3. Live Dashboard Demo Recording
-Here is an animation demonstrating the dynamic interactions of the dashboard:
-
-![Live Demo Recording](./assets/recommender_dashboard_1782202696671.webp)
+### 3. Start the Frontend Dev Server
+```bash
+cd frontend
+npm run dev
+# React App starts on http://localhost:5173
+```

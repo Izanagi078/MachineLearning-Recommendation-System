@@ -6,9 +6,9 @@ import pandas as pd
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from src.data_loader import load_recommender_data
-from src.models import CollaborativeModel, ContentModel, HybridRecommender
-from src.evaluation import calculate_accuracy_metrics, calculate_map_k, calculate_ndcg_k
+from backend.src.data_loader import load_recommender_data
+from backend.src.models import CollaborativeModel, ContentModel, HybridRecommender
+from backend.src.evaluation import calculate_accuracy_metrics, calculate_map_k, calculate_ndcg_k
 
 def run_tests():
     print("=== STARTING AUTOMATED PIPELINE TESTS ===")
@@ -31,8 +31,8 @@ def run_tests():
     col_model = CollaborativeModel(n_factors=10)
     col_model.fit(sample_ratings, apply_decay=False)
     
-    assert col_model.svd is not None, "SVD model not fitted"
-    assert col_model.reconstructed_matrix is not None, "Reconstruction matrix not created"
+    assert col_model.P is not None, "User factor matrix P not created"
+    assert col_model.Q is not None, "Item factor matrix Q not created"
     
     # Test prediction
     test_user_id = sample_ratings['userId'].iloc[0]
@@ -64,17 +64,7 @@ def run_tests():
     recs = {1: [101, 102, 103, 104]}
     test_ratings = {1: [(101, 5.0), (102, 3.0), (105, 4.0)]}
     
-    # Relevant are 101 and 105 (since 102 is rated 3.0 < 4.0 threshold)
-    # Recommended top 4 are [101, 102, 103, 104]
-    # Hit at position 0 (101) is relevant. No other hits.
-    # AP@4 = (1/1) / min(2, 4) = 1.0 / 2 = 0.5
     map_val = calculate_map_k(recs, test_ratings, k=4)
-    # DCG@4 = 1 / log2(0 + 2) = 1.0
-    # IDCG@4 (ideal: 1 hit in first place since min(2, 4)=2 but only 1 relevant item is recommended)
-    # Wait, ideal matches the first n_ideal positions.
-    # n_ideal = min(2, 4) = 2.
-    # IDCG@4 = 1/log2(2) + 1/log2(3) = 1.0 + 0.6309 = 1.6309
-    # NDCG@4 = 1.0 / 1.6309 = 0.613
     ndcg_val = calculate_ndcg_k(recs, test_ratings, k=4)
     
     assert np.isclose(map_val, 0.5), f"MAP calculation mismatch: {map_val}"
@@ -100,7 +90,27 @@ def run_tests():
     assert 'final_score' in recs_df.columns, "Score column missing"
     print(f"[OK] Hybrid Recommender recommendations retrieved successfully.")
     
-    print("\n=== ALL PIPELINE TESTS PASSED SUCCESSFULY ===")
+    # 6. Test Online SVD SGD Updates
+    print("\n6. Testing Online SVD SGD Updates...")
+    # Add a rating and verify matrix changes
+    user_row_idx = col_model.user_mapper[test_user_id]
+    movie_col_idx = col_model.movie_mapper[test_movie_id]
+    
+    orig_p = col_model.P[user_row_idx].copy()
+    orig_q = col_model.Q[movie_col_idx].copy()
+    
+    # Perform online rating update
+    col_model.update_rating_online(test_user_id, test_movie_id, 5.0)
+    
+    updated_p = col_model.P[user_row_idx]
+    updated_q = col_model.Q[movie_col_idx]
+    
+    # Ensure vectors have changed
+    assert not np.array_equal(orig_p, updated_p), "User latent vector did not update"
+    assert not np.array_equal(orig_q, updated_q), "Movie latent vector did not update"
+    print(f"[OK] Online SVD SGD rating updates shift latent vectors successfully.")
+    
+    print("\n=== ALL PIPELINE TESTS PASSED SUCCESSFULLY ===")
 
 if __name__ == "__main__":
     run_tests()

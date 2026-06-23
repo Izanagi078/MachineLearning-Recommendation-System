@@ -4,9 +4,9 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-from src.data_loader import load_recommender_data
-from src.models import CollaborativeModel, ContentModel, HybridRecommender
-from src.evaluation import calculate_accuracy_metrics, calculate_map_k, calculate_ndcg_k, calculate_precision_recall_k
+from backend.src.data_loader import load_recommender_data
+from backend.src.models import CollaborativeModel, ContentModel, HybridRecommender
+from backend.src.evaluation import calculate_accuracy_metrics, calculate_map_k, calculate_ndcg_k, calculate_precision_recall_k
 
 MODELS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models')
 

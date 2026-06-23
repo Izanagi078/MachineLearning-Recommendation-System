@@ -1,29 +1,23 @@
-# Hybrid Movie Recommender Engine with Dynamic Cold-Start Resolution
+# Production-Grade Hybrid Movie Recommender (FastAPI + SQLite + React)
 
-An advanced, production-grade **Hybrid Machine Learning Recommendation System** combining Collaborative Filtering (Matrix Factorization via SVD) and Content-Based NLP Filtering (TF-IDF + Cosine Similarity) using the MovieLens-Latest-Small dataset (100,000 ratings).
+An advanced, production-grade **Decoupled Machine Learning Recommendation System** combining Collaborative Filtering (SVD Matrix Factorization) and Content-Based NLP Filtering (TF-IDF + Cosine Similarity) using the MovieLens-Latest-Small dataset (100,000 ratings).
 
-This project implements advanced engineering practices to solve the standard limitations of retail recommenders, specifically addressing **Cold-Start (Onboarding Mode)**, **Explaining Predictions (XAI)**, and **Multi-Metric Search Optimization** (Diversity vs. Novelty).
+This project transitions standard recommender architectures into a scalable, real-time online learning system utilizing:
+1. **FastAPI Backend**: Serves ensembled recommendations and coordinates live update triggers.
+2. **SQLite Database**: A persistent datastore capturing user interactions and dynamic movie catalog additions.
+3. **Online SGD Matrix Factorization**: Triggers a sub-millisecond Stochastic Gradient Descent (SGD) learning step in RAM on every click to update User ($P$) and Item ($Q$) latent vectors immediately.
+4. **Vite + React Frontend**: A modern glassmorphic dashboard showcasing horizontal carousels, settings sliders, dynamic onboarding, SVD diagnostics plots, and a live global activity stream.
 
 ---
 
 ## 🌟 Key Features
 
-1. **Latent Matrix Factorization SVD**:
-   * Centered SVD using `scikit-learn`'s `TruncatedSVD` on the centered user-movie rating pivot table, predicting missing ratings based on hidden latent preferences.
-   * Incorporates **Temporal Decay Weighting** ($e^{-\lambda t}$) to discount old ratings, making recommendations favor recent tastes.
-2. **Tag-Augmented NLP Content-Based Engine**:
-   * Aggregates user-generated tags, movie titles, and pipe-separated genres into a single content document per movie.
-   * Uses `TfidfVectorizer` and linear similarity kernels to match user profile text vectors against candidates.
-3. **True Cold-Start Onboarding Sandbox**:
-   * If a user is completely new, the UI launches a dynamic onboarding card to collect preferred genres and keywords.
-   * Instantly builds a user profile vector in the TF-IDF space and calculates recommendations using Cosine Similarity.
-4. **Dynamic Active Session Queue**:
-   * Users can click "Like" or "Dislike" directly on recommended movie cards in the Streamlit UI to dynamically adjust their profile vector and re-rank suggestions in real-time.
-5. **Multi-Metric Search Optimization**:
-   * **Novelty Slider (Hidden Gems)**: Adjusts penalty on globally popular blockbusters to highlight highly-rated lesser-known movies.
-   * **Diversity Slider (Genre Coverage)**: Implements a greedy re-ranking genre penalty (MMR-style) to ensure recommended lists span multiple movie categories.
-6. **Explainable AI (XAI) Panel**:
-   * Every recommended movie contains a detailed explanation panel. It outlines why it was recommended, showing either the latent factor similarity to a historically liked movie or the overlapping keywords in the TF-IDF space.
+* **Real-Time SVD SGD Matrix Tuning**: Clicks (Like 👍/Dislike 👎) immediately run a gradient descent coordinate update step in memory, propagating changes instantly to other users.
+* **Dynamic Guest Onboarding**: Resolves cold-start profiles by matching keywords/genres via Content NLP and saving initial mock likes to seed the user's SVD vector.
+* **Persistent SQLite Store**: Keeps live transactions durable across server restarts, automatically replaying logs on startup to rebuild in-memory coordinates.
+* **Explainable AI (XAI) Panels**: Explains *why* a movie is recommended by mapping overlapping TF-IDF tags or listing the closest latent SVD matches.
+* **Diagnostics Dashboard**: Visualizes cumulative explained variance via SVG and shows real-time latent coordinate shifts using an animated equalizer.
+* **Dynamic Catalog Admin Panel**: Enables administrators to add new movies (which dynamically registers vectors in RAM) and archive active ones.
 
 ---
 
@@ -32,54 +26,72 @@ This project implements advanced engineering practices to solve the standard lim
 ```text
 movie_recommender_ml/
 │
-├── data/                    # GroupLens MovieLens-Latest-Small dataset
+├── backend/
+│   ├── app/
+│   │   ├── main.py             # FastAPI API routing
+│   │   ├── database.py         # SQLAlchemy connection configs
+│   │   ├── models_db.py        # SQLite Database Schemas
+│   │   └── schemas.py          # Request validation structures
+│   ├── src/
+│   │   ├── data_loader.py      # Automated dataset downloader
+│   │   ├── models.py           # ML Model layers & SGD updates
+│   │   ├── evaluation.py       # Metrics scoring (RMSE, MAP, NDCG)
+│   │   └── train.py            # Offline batch training pipeline
+│   ├── models/                 # Cached serialized model objects (.pkl)
+│   ├── requirements.txt        # Backend dependencies
+│   ├── run.py                  # Backend local server startup script
+│   └── test_api.py             # Integration test script for the API endpoints
 │
-├── src/
-│   ├── __init__.py
-│   ├── data_loader.py       # Downloads, unzips, aggregates tags, and builds text corpus
-│   ├── models.py            # SVD, TF-IDF, HybridRecommender, and XAI Explanations
-│   ├── evaluation.py        # Ranking validation metrics (RMSE, MAP@K, NDCG@K)
-│   └── train.py             # Offline training pipeline and model serialization (.pkl)
+├── frontend/
+│   ├── src/
+│   │   ├── components/         # React Views (Shelves, LiveFeed, Settings)
+│   │   ├── App.jsx             # Main dashboard controller
+│   │   └── index.css           # Custom glassmorphic vanilla CSS theme
+│   ├── package.json            # Node package specifications
+│   └── vite.config.js          # Vite server configurations
 │
-├── app/
-│   └── dashboard.py         # Streamlit visual interface
-│
-├── requirements.txt         # Package dependencies
-├── test_pipeline.py         # Automated integration and math validation tests
-└── README.md                # Project documentation
+├── test_pipeline.py            # Core ML math validation test script
+└── README.md                   # Project documentation
 ```
 
 ---
 
-## 🚀 Installation and Run Guide
+## 🚀 Installation & Launch Guide
 
-### 1. Set Up Python Dependencies
-Ensure you have the required packages installed in your environment:
+### 1. Pre-Train Batch SVD & NLP Models
+Run the training pipeline from the project root to generate the serialized baseline models:
 ```bash
+python -m backend.src.train
+```
+
+### 2. Start the Backend API
+Install requirements and start the FastAPI local server:
+```bash
+cd backend
 pip install -r requirements.txt
+python run.py
 ```
+*The API is now running on `http://127.0.0.1:8000`.*
 
-### 2. Run the Offline Training and Evaluation
-Train the collaborative SVD and TF-IDF models, run the test-split validation metrics, and serialize the models:
+### 3. Start the Frontend React App
+Install packages and start the Vite development server:
 ```bash
-python -m src.train
+cd frontend
+npm install
+npm run dev
 ```
-
-*This will output the test metrics (RMSE, MAP@10, NDCG@10) and save model files to the `models/` cache folder.*
-
-### 3. Launch the Interactive Dashboard
-Run the Streamlit app:
-```bash
-streamlit run app/dashboard.py
-```
-
-*Open `http://localhost:8501` in your browser to interact with the dashboard.*
+*The React App is now running on `http://localhost:5173`.*
 
 ---
 
-## 📊 Evaluation & Mathematical Validation
+## 📡 API Endpoints Summary
 
-The training script validates the models on an 80/20 train-test split, outputting:
-* **RMSE / MAE**: SVD rating prediction accuracy (Standard: `~0.93` RMSE).
-* **Mean Average Precision (MAP@10)**: Measures the relevance of recommended movies.
-* **Normalized Discounted Cumulative Gain (NDCG@10)**: Evaluates the system's ability to rank highly relevant movies at the top of the recommended list.
+* `GET /api/stats`: SVD explained variance, total users/movies, and RMSE.
+* `GET /api/movies/popular`: Fallback universal shelf.
+* `GET /api/movies/search?query=...`: Auto-complete title matches.
+* `POST /api/onboarding`: Resolve cold-starts and retrieve a secure guest session ID.
+* `GET /api/recommendations?userId=...`: Query ensembled predictions and XAI explanations.
+* `POST /api/ratings`: Record likes/dislikes and trigger online SGD step.
+* `GET /api/feed`: Real-time network stream of logs from all users.
+* `POST /api/movies`: Admin add new movie.
+* `DELETE /api/movies/{id}`: Admin soft delete/archive.
