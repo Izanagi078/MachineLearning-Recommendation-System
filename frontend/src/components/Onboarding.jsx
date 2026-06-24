@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import api from '../api';
 
 const AVAILABLE_GENRES = [
   'Action', 'Adventure', 'Animation', 'Children', 'Comedy', 'Crime',
@@ -26,31 +27,13 @@ export default function Onboarding({ onSubmit, currentUserId }) {
       setErrorMsg('Please select at least one genre or enter search keywords.');
       return;
     }
-
     setIsSubmitting(true);
     setErrorMsg('');
-
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/onboarding', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          genres: selectedGenres,
-          keywords: keywords.trim(),
-          userId: currentUserId || null
-        })
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        // Show confirmation screen with matched movies before transitioning
-        setMatchedMovies({ userId: data.userId, movies: data.matched_movies || [] });
-      } else {
-        const errData = await response.json();
-        setErrorMsg(`Failed: ${errData.detail || 'Network error'}`);
-      }
+      const data = await api.submitOnboarding(selectedGenres, keywords.trim(), currentUserId || null);
+      setMatchedMovies({ userId: data.userId, movies: data.matched_movies || [] });
     } catch (err) {
-      setErrorMsg('Failed to connect to recommendation backend.');
+      setErrorMsg(`Failed: ${err.body?.detail || 'Network error'}`);
     } finally {
       setIsSubmitting(false);
     }

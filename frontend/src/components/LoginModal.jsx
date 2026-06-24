@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import api from '../api';
 
 const DEMO_USERS = ['User 10', 'User 50', 'User 100', 'User 200', 'User 300'];
 
@@ -19,50 +20,26 @@ export default function LoginModal({ isOpen, onClose, onLogin }) {
 
     try {
       if (selectedDemo) {
-        // Demo mode (passwordless bypass token request)
-        const response = await fetch('http://127.0.0.1:8000/api/auth/demo', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: selectedDemo, password: '' })
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          onLogin(data.username, data.token);
-          setSelectedDemo('');
-          onClose();
-        } else {
-          const errData = await response.json();
-          setError(errData.detail || 'Demo login failed.');
-        }
+        const data = await api.loginDemo(selectedDemo);
+        onLogin(data.username, data.token);
+        setSelectedDemo('');
+        onClose();
       } else {
-        // Custom Auth mode
         if (!username.trim() || !password) {
           setError('Please fill in both username and password.');
           setLoading(false);
           return;
         }
-
-        const endpoint = mode === 'login' ? 'login' : 'register';
-        const response = await fetch(`http://127.0.0.1:8000/api/auth/${endpoint}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: username.trim(), password })
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          onLogin(data.username, data.token);
-          setUsername('');
-          setPassword('');
-          onClose();
-        } else {
-          const errData = await response.json();
-          setError(errData.detail || `${mode === 'login' ? 'Login' : 'Registration'} failed.`);
-        }
+        const data = mode === 'login'
+          ? await api.login(username.trim(), password)
+          : await api.register(username.trim(), password);
+        onLogin(data.username, data.token);
+        setUsername('');
+        setPassword('');
+        onClose();
       }
     } catch (err) {
-      setError('Cannot connect to authorization server.');
+      setError(err.body?.detail || 'Cannot connect to authorization server.');
     } finally {
       setLoading(false);
     }

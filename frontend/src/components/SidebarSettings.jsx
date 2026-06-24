@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import api from '../api';
 
 export default function SidebarSettings({
   weightCol,
@@ -23,34 +24,16 @@ export default function SidebarSettings({
       setStatusMsg('Please enter both title and genres.');
       return;
     }
-
     setIsSubmitting(true);
     setStatusMsg('');
-
     try {
-      const token = localStorage.getItem('token');
-      const headers = { 'Content-Type': 'application/json' };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-      const response = await fetch('http://127.0.0.1:8000/api/movies', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ title, genres })
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setStatusMsg(`Successfully added "${data.title}" (ID: ${data.movieId})!`);
-        setTitle('');
-        setGenres('');
-        if (onAddMovieSuccess) onAddMovieSuccess();
-      } else {
-        const errData = await response.json();
-        setStatusMsg(`Error: ${errData.detail || 'Failed to add movie'}`);
-      }
+      const data = await api.addMovie({ title, genres });
+      setStatusMsg(`Successfully added "${data.title}" (ID: ${data.movieId})!`);
+      setTitle('');
+      setGenres('');
+      if (onAddMovieSuccess) onAddMovieSuccess();
     } catch (err) {
-      setStatusMsg('Server connection failed.');
+      setStatusMsg(`Error: ${err.body?.detail || 'Failed to add movie'}`);
     } finally {
       setIsSubmitting(false);
     }
