@@ -10,100 +10,64 @@ We transitioned the project from a monolithic Streamlit layout to a distributed 
 
 ### 1. Backend API (`backend/`)
 * **FastAPI Service (`backend/app/main.py`)**: Serves recommendations, logs clicks, performs online learning updates, and acts as the central orchestrator.
-* **SQLite Persistence (`backend/app/database.py`, `backend/app/models_db.py`)**: Stores live user interaction logs and catalog modifications. Ensures data is persistent across server restarts.
-* **Online SGD Matrix Factorization (`backend/src/models.py`)**: Exposes latent User ($P$) and Item ($Q$) matrices. When a user rates a movie, it runs a real-time Stochastic Gradient Descent step in memory to update coordinates:
-  $$P_u \leftarrow P_u + \gamma \cdot (e_{ui} \cdot Q_i - \lambda \cdot P_u)$$
-  $$Q_i \leftarrow Q_i + \gamma \cdot (e_{ui} \cdot P_u - \lambda \cdot Q_i)$$
+* **SQLite Persistence (`backend/app/database.py`, `backend/app/models_db.py`)**: Stores live user interaction logs and catalog modifications. Connection pooling parameters have been configured to support production loads.
+* **Online SGD Matrix Factorization (`backend/src/models.py`)**: Exposes latent User ($P$) and Item ($Q$) latent factor matrices. When a user rates a movie, it runs a real-time Stochastic Gradient Descent step in memory to update coordinates.
+* **Cache Layer (`backend/app/cache.py`)**: A thread-safe Least Recently Used (LRU) cache with a Time-To-Live (TTL) wraps stats and popular movies endpoints. The cache is automatically cleared when new ratings are submitted or movies are added/deleted.
+* **Model Retraining & Scheduler (`backend/src/retrain.py`)**: A background retraining script that fetches live ratings and custom movies from SQLite, combines them with baseline data, retrains SVD/TF-IDF models, and performs an atomic in-memory swap on the running FastAPI application with zero server downtime. It runs automatically every 24 hours via a background daemon thread.
 
 ### 2. Frontend Application (`frontend/`)
 * **Vite + React Template**: Replaces Streamlit with a highly performant, responsive React app.
+* **Decoupled API Client (`api.js`)**: All `fetch()` API calls are consolidated in a central client, reading `VITE_API_BASE` from environment files (`.env`).
+* **Zustand Store (`store/useAppStore.js`)**: State management is fully decoupled from components. UI state, session profiles, algorithm controls, and recommendation data slices are handled in a single atom.
 * **Settings Control Center (`SidebarSettings.jsx`)**: Real-time sliders to tune Collaborative weight, Novelty penalty, and Genre diversity penalty.
 * **Onboarding Module (`Onboarding.jsx`)**: Cold-start resolver mapping queries through Content TF-IDF similarities to bootstrap guest profiles.
 * **Global Activity Feed (`LiveFeed.jsx`)**: Live sidebar component polling the backend SQLite logs every 5 seconds to display updates from *all* active user sessions.
 * **Diagnostics Dashboard (`VisualCharts.jsx`)**: SVG line plots displaying SVD explained variance and an animated coordinate equalizer showing latent user coordinate shifts.
-* **Dynamic Catalog Manager**: Admin panel to add new movies (dynamically vectorizing text and expanding SVD matrices in RAM) and soft-delete/hide movies.
 
 ---
 
-## 📈 Integration & API Test Results
+## 🧪 Automated Testing Suite
 
-We ran automated integration tests covering the database operations, online SGD learning updates, and API endpoint routing.
+We implemented an extensive pytest suite under `backend/tests/` with 74 fully passing unit, integration, and ML math tests.
 
-### API Integration Test Output (`backend/test_api.py`):
-```text
-=== RUNNING API ENDPOINT TESTS ===
-
-1. Testing GET /api/stats...
-[OK] Stats check passed. Total Ratings: 100836, RMSE: 0.9366
-
-2. Testing POST /api/onboarding...
-[OK] Onboarding passed. Generated Guest User ID: guest_8a2d131f
-     Matched Movies: ['Back to the Future (1985)', 'Star Wars: Episode IV - A New Hope (1977)', 'Terminator 2: Judgment Day (1991)', 'Matrix, The (1999)', 'Interstellar (2014)']
-
-3. Testing GET /api/recommendations...
-[OK] Recommendations passed. Received 10 personalized items.
-
-4. Testing POST /api/ratings (Online SGD step)...
-[OK] Rating submission processed successfully.
-
-5. Testing GET /api/feed (Network Feed)...
-[OK] Global network feed verified. Last action: User guest_8a2d131f rated movie 1270 (Back to the Future (1985)).
-
-=== ALL FastAPI ENDPOINT INTEGRATION TESTS PASSED ===
+### Running Pytest Suite
+```bash
+python -m pytest backend/tests/ -v
 ```
 
-### Core Pipeline Test Output (`test_pipeline.py`):
-```text
-=== STARTING AUTOMATED PIPELINE TESTS ===
-
-1. Testing Ingestion and Data Loading...
-[OK] Ingestion passed. Loaded 100836 ratings, 9742 movies.
-
-2. Testing Collaborative Model (SVD)...
-[CollaborativeModel] Trained SVD. P shape: (346, 10), Q shape: (786, 10)
-[OK] SVD collaborative fitting passed. Predict sample rating: 3.83
-
-3. Testing Content-Based Model (TF-IDF)...
-[ContentModel] Fitted TF-IDF matrix of shape (9742, 9947)
-[OK] TF-IDF content fitting passed. Vocabulary size: 9947
-
-4. Testing Evaluation Metrics Math...
-[OK] Accuracy (RMSE) and Ranking (MAP, NDCG) math checked successfully.
-
-5. Testing Hybrid Recommender Assembly...
-[OK] Hybrid Recommender recommendations retrieved successfully.
-
-6. Testing Online SVD SGD Updates...
-[OK] Online SVD SGD rating updates shift latent vectors successfully.
-
-=== ALL PIPELINE TESTS PASSED SUCCESSFULLY ===
-```
+### Coverage Details:
+1. **Authentication (`test_auth.py`)**: Registration success, duplicate usernames, password validation, login credentials checks, token issuance, and demo profile access.
+2. **Dependencies (`test_dependencies.py`)**: Secure PBKDF2 password hashing, salt validation, token signing/verification, and header parsing.
+3. **Activity Feed (`test_feed.py`)**: Stats dashboard serialization, movies count active filters, global activity feed serialization, limit caps, and pagination.
+4. **Movies Catalog (`test_movies.py`)**: Popular movie listings, title search query logic, case insensitivity, admin movie additions, SVD registry registration, and soft deletion.
+5. **Onboarding (`test_onboarding.py`)**: Guest ID boots, registered profile matching, input validator schemas, and SVD profile bootstrapping.
+6. **Ratings (`test_ratings.py`)**: Guest/registered user ratings submissions, SVD real-time SGD vector shift validation, dislikes weighting, and rating history listings.
+7. **Recommendations (`test_recommendations.py`)**: Guest recommendations, user token authorizations, algorithm weights, and Explainable AI (XAI) explanation blocks.
+8. **Admin Operations (`test_admin.py`)**: Retrain authorization guards, trigger batch retraining checks, and model swap verifications.
+9. **ML Pipeline Math (`test_ml_math.py`)**: Collaborative SVD fit accuracy, online SGD parameter tuning correctness, and content TF-IDF sparse matrix vectorization.
 
 ---
 
 ## 🚀 Running the Project
 
-### 1. Install Dependencies
+### 1. Pre-Train Batch SVD & NLP Models
+Run the training pipeline from the project root to generate baseline models:
 ```bash
-# Backend
+python -m backend.src.train
+```
+
+### 2. Start the Backend API
+```bash
 cd backend
 pip install -r requirements.txt
-
-# Frontend
-cd ../frontend
-npm install
-```
-
-### 2. Start the Backend API Server
-```bash
-cd backend
 python run.py
-# Server starts on http://127.0.0.1:8000
 ```
+*API runs on `http://127.0.0.1:8000`.*
 
-### 3. Start the Frontend Dev Server
+### 3. Start the Frontend React App
 ```bash
 cd frontend
+npm install
 npm run dev
-# React App starts on http://localhost:5173
 ```
+*Vite dev server starts on `http://localhost:5173`.*
