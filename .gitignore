@@ -5,7 +5,12 @@ data/
 *.pkl
 .streamlit/
 
-# Prevent committing screenshots or recordings
+# ── Environment / Secrets (NEVER commit these) ────────────────────────────
+.env
+backend/.env
+frontend/.env
+
+# ── Screenshots and recordings ────────────────────────────────────────────
 *.png
 *.jpg
 *.jpeg
@@ -14,7 +19,16 @@ data/
 *.mp4
 *.webm
 *.mov
-*.webp
 *screenshot*
 *layout_check*
 *dashboard*
+
+# ── Node modules ──────────────────────────────────────────────────────────
+node_modules/
+frontend/dist/
+
+# ── Python build artifacts ────────────────────────────────────────────────
+*.egg-info/
+dist/
+build/
+.pytest_cache/

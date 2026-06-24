@@ -9,6 +9,7 @@ import LoginModal from './components/LoginModal';
 export default function App() {
   const [userId, setUserId] = useState(() => localStorage.getItem('userId') || '');
   const [sessionRatings, setSessionRatings] = useState({});
+  const [hasOnboarded, setHasOnboarded] = useState(() => localStorage.getItem('hasOnboarded') === 'true');
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   
   // Recommendations and Shelves
@@ -201,7 +202,9 @@ export default function App() {
   const handleResetSession = () => {
     localStorage.removeItem('userId');
     localStorage.removeItem('token');
+    localStorage.removeItem('hasOnboarded');
     setUserId('');
+    setHasOnboarded(false);
     setSessionRatings({});
     setRecommendations([]);
     setSearchResults([]);
@@ -216,6 +219,8 @@ export default function App() {
       localStorage.setItem('userId', returnedUserId);
       setUserId(returnedUserId);
     }
+    localStorage.setItem('hasOnboarded', 'true');
+    setHasOnboarded(true);
     setSessionRatings({}); // reset session rating indicators
   };
 
@@ -229,9 +234,11 @@ export default function App() {
   const handleLogin = async (username, token) => {
     localStorage.setItem('userId', username);
     localStorage.setItem('token', token);
+    localStorage.setItem('hasOnboarded', 'true'); // registered users skip onboarding
     setUserId(username);
+    setHasOnboarded(true);
     setSessionRatings({});
-    
+
     try {
       const headers = {};
       if (token) {
@@ -275,8 +282,8 @@ export default function App() {
           </p>
         </div>
 
-        {/* Determine if onboarding is required for cold start */}
-        {!userId || (!userId.startsWith('User ') && Object.keys(sessionRatings).length === 0) ? (
+        {/* Show onboarding only if profile hasn't been bootstrapped yet */}
+        {!hasOnboarded ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', marginTop: '20px' }}>
             {!userId && (
               <p style={{ color: 'var(--text-secondary)', textAlign: 'center', maxWidth: '500px', fontSize: '0.85rem' }}>
@@ -285,7 +292,7 @@ export default function App() {
             )}
             {userId && (
               <p style={{ color: 'var(--text-secondary)', textAlign: 'center', maxWidth: '500px', fontSize: '0.85rem' }}>
-                Welcome, <strong>{userId}</strong>! Since you are a new user, please choose your interests to bootstrap your SVD latent vector.
+                Welcome, <strong>{userId}</strong>! Choose your interests to bootstrap your SVD latent vector.
               </p>
             )}
             <Onboarding onSubmit={handleOnboardingSubmit} currentUserId={userId} />

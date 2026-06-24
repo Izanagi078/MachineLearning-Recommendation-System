@@ -155,6 +155,8 @@ export default function LoginModal({ isOpen, onClose, onLogin }) {
               Select Pre-Trained Demo Profile:
             </label>
             <select
+              id="demo-profile-select"
+              name="demoProfile"
               value={selectedDemo}
               onChange={(e) => {
                 setSelectedDemo(e.target.value);
@@ -194,8 +196,11 @@ export default function LoginModal({ isOpen, onClose, onLogin }) {
                   Username:
                 </label>
                 <input
+                  id="auth-username"
+                  name="username"
                   type="text"
                   placeholder="e.g. movie_fan"
+                  autoComplete="username"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   style={{
@@ -218,8 +223,11 @@ export default function LoginModal({ isOpen, onClose, onLogin }) {
                   Password:
                 </label>
                 <input
+                  id="auth-password"
+                  name="password"
                   type="password"
                   placeholder="••••••••"
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   style={{
