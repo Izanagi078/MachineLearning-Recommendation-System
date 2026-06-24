@@ -4,11 +4,13 @@ from sqlalchemy.orm import Session
 
 from backend.app.database import get_db
 from backend.app.models_db import DBRating, DBMovie
+from backend.app.cache import cache_dec
 
 router = APIRouter(prefix="", tags=["Feed"])
 
 
 @router.get("/stats")
+@cache_dec("stats", maxsize=16, ttl=300)
 def get_stats(request: Request, db: Session = Depends(get_db)):
     """Returns SVD model diagnostics, rating counts, and evaluation metrics."""
     from backend.app.main import app

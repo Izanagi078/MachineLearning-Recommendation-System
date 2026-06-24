@@ -11,6 +11,7 @@ from backend.app.database import get_db
 from backend.app.models_db import DBRating
 from backend.app.schemas import OnboardingRequest, RatingCreate
 from backend.app.dependencies import get_current_user_optional
+from backend.app.cache import invalidate_all_caches
 
 router = APIRouter(prefix="", tags=["Recommendations"])
 
@@ -54,6 +55,9 @@ def user_onboarding(request: Request, req: OnboardingRequest, db: Session = Depe
     db.commit()
     new_ratings_df = pd.DataFrame(new_ratings_list)
     app.state.ratings_df = pd.concat([app.state.ratings_df, new_ratings_df], ignore_index=True)
+    
+    # Invalidate cache since database ratings count and metrics changed
+    invalidate_all_caches()
 
     return {
         "userId": effective_user_id,
@@ -128,6 +132,9 @@ def submit_rating(
         "timestamp": timestamp,
     }])
     app.state.ratings_df = pd.concat([app.state.ratings_df, new_row], ignore_index=True)
+
+    # Invalidate cache since database ratings count and metrics changed
+    invalidate_all_caches()
 
     return {"message": "Rating processed and model updated in real-time."}
 

@@ -8,11 +8,13 @@ from backend.app.database import get_db
 from backend.app.models_db import DBMovie
 from backend.app.schemas import MovieCreate
 from backend.app.dependencies import get_current_user_optional
+from backend.app.cache import cache_dec, invalidate_all_caches
 
 router = APIRouter(prefix="/movies", tags=["Movies"])
 
 
 @router.get("/popular")
+@cache_dec("popular_movies", maxsize=64, ttl=300)
 def get_popular_movies(request: Request, limit: int = 10, page: int = 1):
     """Returns globally popular movies ranked by rating count.
 
@@ -96,6 +98,9 @@ def add_movie(
     }])
     app.state.movies_df = pd.concat([app.state.movies_df, new_row], ignore_index=True)
 
+    # Invalidate cache since movie count changed
+    invalidate_all_caches()
+
     return db_movie
 
 
@@ -121,5 +126,8 @@ def delete_movie(
     db_movie.is_active = False
     db.commit()
     app.state.movies_df.loc[app.state.movies_df["movieId"] == movieId, "is_active"] = False
+
+    # Invalidate cache since active movie count and list changed
+    invalidate_all_caches()
 
     return {"message": f"Movie {movieId} archived successfully."}
