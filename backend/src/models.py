@@ -144,26 +144,36 @@ class CollaborativeModel:
 
     def update_rating_online(self, user_id, movie_id: int, rating: float, lr_p=0.1, lr_q=0.005, reg=0.02):
         """
-        Performs a single Stochastic Gradient Descent (SGD) step in-memory
-        to update user vector P_u and movie vector Q_i.
+        Performs a single, real-time Stochastic Gradient Descent (SGD) update step
+        to adjust the latent User vector (P_u) and movie vector (Q_i) in-memory.
+        
+        This enables sub-millisecond, online updates to recommendation profiles
+        without requiring full batch SVD refitting.
+        
+        Math formulation:
+          Error: e = r - (mean_u + P_u . Q_i^T)
+          Update user vector: P_u <- P_u + lr_p * (e * Q_i - reg * P_u)
+          Update movie vector: Q_i <- Q_i + lr_q * (e * P_u - reg * Q_i)
         """
         u_idx = self.register_new_user(user_id)
         m_idx = self.register_new_movie(movie_id)
         
-        # Get active user mean
+        # 1. Retrieve the user's running mean rating (baseline bias parameter)
         user_key = user_id if user_id in self.user_means else str(user_id)
         if user_key not in self.user_means:
             self.user_means[user_key] = float(self.global_mean)
             
-        # Calculate Prediction & Error
+        # 2. Compute prediction error: error = target - predicted
+        # Incorporate latent factors dot product ensembled with the user's rating mean bias
         pred_centered = np.dot(self.P[u_idx], self.Q[m_idx])
         pred_rating = pred_centered + self.user_means[user_key]
         error = rating - pred_rating
         
-        # 1. Update user mean rating
+        # 3. Incrementally adjust user rating bias/mean with error correction
         self.user_means[user_key] = float(np.clip(self.user_means[user_key] + 0.1 * error, 0.5, 5.0))
         
-        # 2. Update SVD Latent Vectors (SGD equations)
+        # 4. Perform SVD Latent Vector adjustments using SGD equations
+        # Copy vectors first to ensure updates to P don't affect Q update math in the same step
         p_temp = self.P[u_idx].copy()
         q_temp = self.Q[m_idx].copy()
         
