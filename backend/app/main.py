@@ -19,7 +19,7 @@ from backend.app.database import engine, SessionLocal, Base
 from backend.app.models_db import DBMovie, DBRating
 from backend.src.models import HybridRecommender
 from backend.app.dependencies import limiter
-from backend.app.routers import auth_router, movies_router, recommendations_router, feed_router
+from backend.app.routers import auth_router, movies_router, recommendations_router, feed_router, admin_router
 
 # ── FastAPI App ───────────────────────────────────────────────────────────────
 app = FastAPI(
@@ -56,6 +56,7 @@ app.include_router(auth_router, prefix="/api/v1")
 app.include_router(movies_router, prefix="/api/v1")
 app.include_router(recommendations_router, prefix="/api/v1")
 app.include_router(feed_router, prefix="/api/v1")
+app.include_router(admin_router, prefix="/api/v1")
 
 # ── Backward-compatible legacy /api/ aliases ──────────────────────────────────
 # Expose same handlers under /api/... to prevent breaking existing clients.
@@ -63,6 +64,7 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(movies_router, prefix="/api")
 app.include_router(recommendations_router, prefix="/api")
 app.include_router(feed_router, prefix="/api")
+app.include_router(admin_router, prefix="/api")
 
 
 MODELS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models")
@@ -162,6 +164,26 @@ def startup_event():
 
         app.state.hybrid_recommender = HybridRecommender(app.state.col_model, app.state.content_model)
         print("[Startup] Backend successfully synchronized and ready.")
+
+        # Start background daemon thread for 24-hour model retraining
+        import threading
+        import time
+        def schedule_retrain_loop():
+            # Retrain every 24 hours (86400 seconds)
+            interval = 86400
+            while True:
+                time.sleep(interval)
+                print("[Scheduler] Starting automatic 24-hour model retraining...")
+                try:
+                    from backend.src.retrain import retrain_model_pipeline
+                    retrain_model_pipeline(app=app)
+                    print("[Scheduler] Automatic model retraining completed successfully.")
+                except Exception as e:
+                    print(f"[Scheduler] Automatic retraining failed: {e}")
+
+        retrain_thread = threading.Thread(target=schedule_retrain_loop, daemon=True)
+        retrain_thread.start()
+        print("[Startup] Background retrain scheduler thread started.")
 
     finally:
         db.close()
