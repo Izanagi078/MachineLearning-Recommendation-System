@@ -6,57 +6,66 @@ An advanced, enterprise-grade **Decoupled Machine Learning Recommendation System
 
 ## 🏗️ System Architecture
 
-The recommendation engine is built as a fully decoupled client-server architecture. Below is the block flow diagram outlining the ingestion, online learning, caching, and serving components:
+The recommendation engine is built as a fully decoupled client-server architecture. Below is the block flow diagram outlining the ingestion, online learning, caching, TMDB integrations, and storage components:
 
 ```text
-                        ┌────────────────────────────────────────────────────────┐
-                        │                     Vite + React                       │
-                        │                       Frontend                         │
-                        └─────────┬────────────────────────────▲─────────────────┘
-                                  │                            │
-                     JSON Requests│                            │JSON Responses
-                    (Bearer Token)│                            │(XAI Explanations)
-                                  ▼                            │
-      ┌────────────────────────────────────────────────────────┴─────────────────┐
-      │                                 FASTAPI BACKEND                          │
-      │                                                                          │
-      │  ┌───────────────────────┐            ┌───────────────────────────────┐  │
-      │  │  Limiter Rate Limit   │            │   LRU Cache Layer (cache.py)  │  │
-      │  └──────────┬────────────┘            └───────────────▲───────────────┘  │
-      │             │                                         │                  │
-      │             ▼                                         │                  │
-      │  ┌───────────────────────┐            ┌───────────────┴───────────────┐  │
-      │  │    Versioned / Legacy │            │    get_popular_movies()       │  │
-      │  │      API Routers      ├───────────►│    get_stats()                │  │
-      │  └──────────┬────────────┘            └───────────────────────────────┘  │
-      │             │                                                            │
-      │             ▼                                                            │
-      │  ┌────────────────────────────────────────────────────────────────────┐  │
-      │  │                       HYBRID RECOMMENDATION ENGINE                 │  │
-      │  │                                                                    │  │
-      │  │  ┌─────────────────────────────┐    ┌───────────────────────────┐  │  │
-      │  │  │   Collaborative SVD Model   │    │    Content TF-IDF Model   │  │  │
-      │  │  │   - P: User Latent Vector   │    │    - Sparse NLP Matrix    │  │  │
-      │  │  │   - Q: Item Latent Vector   │    │    - Cosine Similarity    │  │  │
-      │  │  └─────────────┬───────────────┘    └──────────────┬────────────┘  │  │
-      │  │                │                                   │               │  │
-      │  │                └─────────────────┬─────────────────┘               │  │
-      │  │                                  ▼                                 │  │
-      │  │                        HybridRecommender (Ensemble)                │  │
-      │  └──────────────────────────────────┬─────────────────────────────────┘  │
-      │                                     │                                    │
-      │                                     ▼                                    │
-      │                       ┌──────────────────────────┐                       │
-      │                       │  Online SGD Update Step  │                       │
-      │                       └─────────────┬────────────┘                       │
-      └─────────────────────────────────────┼────────────────────────────────────┘
-                                            │
-                                  Write SQL │ (DBRating / DBMovie / DBUser)
-                                            ▼
-                                ┌──────────────────────┐
-                                │   SQLite Database    │
-                                │  (live_ratings.db)   │
-                                └──────────────────────┘
+                                        ┌──────────────────────────────┐
+                                        │          TMDB API            │
+                                        │       (api.tmdb.org)         │
+                                        └──────────────▲───────────────┘
+                                                       │
+                                                       │ HTTPS GET (poster_path)
+                                                       │
+                         ┌─────────────────────────────┴──────────────────────────┐
+                         │                     Vite + React                       │
+                         │                       Frontend                         │
+                         └─────────┬────────────────────────────▲─────────────────┘
+                                   │                            │
+                      JSON Requests│                            │JSON Responses
+                     (Bearer Token)│                            │(XAI + Posters)
+                                   ▼                            │
+       ┌────────────────────────────────────────────────────────┴─────────────────┐
+       │                                 FASTAPI BACKEND                          │
+       │                                                                          │
+       │  ┌───────────────────────┐            ┌───────────────────────────────┐  │
+       │  │  Limiter Rate Limit   │            │     Redis Cache Namespace     │  │
+       │  └──────────┬────────────┘            │     (In-Memory Fallback)      │  │
+       │             │                         └───────────────▲───────────────┘  │
+       │             ▼                                         │                  │
+       │  ┌───────────────────────┐            ┌───────────────┴───────────────┐  │
+       │  │    Versioned / Legacy │            │    get_popular_movies()       │  │
+       │  │      API Routers      ├───────────►│    get_stats()                │  │
+       │  └──────────┬────────────┘            └───────────────────────────────┘  │
+       │             │                                                            │
+       │             ▼                                                            │
+       │  ┌────────────────────────────────────────────────────────────────────┐  │
+       │  │                       HYBRID RECOMMENDATION ENGINE                 │  │
+       │  │                                                                    │  │
+       │  │  ┌─────────────────────────────┐    ┌───────────────────────────┐  │  │
+       │  │  │   Collaborative SVD Model   │    │    Content TF-IDF Model   │  │  │
+       │  │  │   - P: User Latent Vector   │    │    - Sparse NLP Matrix    │  │  │
+       │  │  │   - Q: Item Latent Vector   │    │    - Cosine Similarity    │  │  │
+       │  │  └─────────────┬───────────────┘    └──────────────┬────────────┘  │  │
+       │  │                │                                   │               │  │
+       │  │                └─────────────────┬─────────────────┘               │  │
+       │  │                                  ▼                                 │  │
+       │  │                        HybridRecommender (Ensemble)                │  │
+       │  └──────────────────────────────────┬─────────────────────────────────┘  │
+       │                                     │                                    │
+       │                                     ▼                                    │
+       │                       ┌──────────────────────────┐                       │
+       │                       │   Online SGD (5 Epochs)  │                       │
+       │                       └─────────────┬────────────┘                       │
+       └─────────────────────────────────────┼────────────────────────────────────┘
+                                             │
+                                   Write SQL │ (DBRating / DBMovie / DBUser)
+                                             │
+                    ┌────────────────────────┴────────────────────────┐
+                    ▼                                                 ▼
+         ┌──────────────────────┐                          ┌──────────────────────┐
+         │     PostgreSQL       │◄───[Synced / Fallback]───►│        SQLite        │
+         │    (Neon Cloud)      │                          │  (live_ratings.db)   │
+         └──────────────────────┘                          └──────────────────────┘
 ```
 
 ---
@@ -75,7 +84,7 @@ $$
 where $\mu_u$ is the mean rating submitted by user $u$.
 
 ### 2. Online Stochastic Gradient Descent (SGD) Learning
-When a user rates a movie in real-time, the system bypasses slow retraining by updating the user and movie coordinate factors in memory using a sub-millisecond SGD step:
+When a user rates a movie in real-time, the system bypasses slow retraining by updating the user and movie coordinate factors in memory using 5 epochs of online SGD steps (helping coordinates converge instantly):
 
 $$
 \begin{aligned}
@@ -200,16 +209,16 @@ Forces baseline batch retraining. Loads base datasets + live SQLite history, reb
 
 ---
 
-## 📈 Database Connection Pooling & LRU Caching
+## 📈 Database & Distributed Cache Configurations
 
-- **Connection Pool**: In production, SQLAlchemy is configured with connection recycling and pre-ping verifications to prevent stale sockets:
-  - `pool_size`: 10 connections
-  - `max_overflow`: 20 connections
-  - `pool_recycle`: 1800 seconds
-- **LRU Cache Layer**: A thread-safe Least Recently Used (LRU) cache with a Time-To-Live (TTL) is integrated for slow endpoints:
-  - `/api/stats`: Cached for 300s
-  - `/api/movies/popular`: Cached for 300s
-  - Caches are automatically invalidated in real-time when ratings are submitted, or movies are added/archived.
+- **Primary Database (Neon PostgreSQL)**: The system connects to a remote cloud PostgreSQL database by default using connection pooling configurations. If the connection details are omitted or fail, it gracefully falls back to a local disk-backed **SQLite** (`live_ratings.db`).
+  - `pool_size`: 10 connections (configurable via `DB_POOL_SIZE`)
+  - `max_overflow`: 20 connections (configurable via `DB_MAX_OVERFLOW`)
+  - `pool_recycle`: 1800 seconds (configurable via `DB_POOL_RECYCLE`)
+
+- **Distributed Cache (Redis)**: When `REDIS_URL` is set, the caching namespaces (`popular_movies`, etc.) serialize and store payloads on a centralized Redis cache.
+  - If Redis is unavailable or unconfigured, the system automatically falls back to an **in-memory thread-safe LRU Cache** (`SimpleLRUCache`).
+  - Cache namespaces are automatically invalidated when custom ratings are submitted or catalog movies are added/deleted.
 
 ---
 

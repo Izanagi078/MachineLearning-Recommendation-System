@@ -6,14 +6,15 @@ This document details the completed implementation of the production-grade **Hyb
 
 ## 🎬 Architecture & Completed Components
 
-We transitioned the project from a monolithic Streamlit layout to a distributed **FastAPI Backend + SQLite Database + React Frontend** system:
+We transitioned the project from a monolithic Streamlit layout to a distributed **FastAPI Backend + PostgreSQL (Neon Cloud) + Redis + React Frontend** system:
 
 ### 1. Backend API (`backend/`)
 * **FastAPI Service (`backend/app/main.py`)**: Serves recommendations, logs clicks, performs online learning updates, and acts as the central orchestrator.
-* **SQLite Persistence (`backend/app/database.py`, `backend/app/models_db.py`)**: Stores live user interaction logs and catalog modifications. Connection pooling parameters have been configured to support production loads.
-* **Online SGD Matrix Factorization (`backend/src/models.py`)**: Exposes latent User ($P$) and Item ($Q$) latent factor matrices. When a user rates a movie, it runs a real-time Stochastic Gradient Descent step in memory to update coordinates.
-* **Cache Layer (`backend/app/cache.py`)**: A thread-safe Least Recently Used (LRU) cache with a Time-To-Live (TTL) wraps stats and popular movies endpoints. The cache is automatically cleared when new ratings are submitted or movies are added/deleted.
-* **Model Retraining & Scheduler (`backend/src/retrain.py`)**: A background retraining script that fetches live ratings and custom movies from SQLite, combines them with baseline data, retrains SVD/TF-IDF models, and performs an atomic in-memory swap on the running FastAPI application with zero server downtime. It runs automatically every 24 hours via a background daemon thread.
+* **PostgreSQL & SQLite Database (`backend/app/database.py`, `backend/app/models_db.py`)**: Connects to a cloud-hosted Neon PostgreSQL database by default, falling back gracefully to local **SQLite** (`live_ratings.db`) if unconfigured. Stores live user ratings, catalog additions/deletions, and cached movie poster paths.
+* **Online SGD Matrix Factorization (`backend/src/models.py`)**: Exposes User ($P$) and Item ($Q$) latent factor matrices, updating vectors on rating submissions dynamically. Runs SGD for 5 epochs to speed up profile convergence.
+* **Distributed Cache (`backend/app/cache.py`)**: Stores serialization states inside a distributed **Redis** database if `REDIS_URL` is set, falling back to a local **in-memory SimpleLRUCache** with a TTL. Caches are invalidated instantly when ratings are updated.
+* **Model Retraining & Scheduler (`backend/src/retrain.py`)**: A background retraining script that fetches live ratings and custom movies from the active database, combines them with baseline data, retrains SVD/TF-IDF models, and performs an atomic in-memory swap on the running FastAPI application with zero server downtime. It runs automatically every 24 hours via a background daemon thread.
+* **TMDB Image Poster Integration (`backend/app/tmdb.py`)**: Queries the TMDB API (`api.tmdb.org`) using `TMDB_API_KEY` or `TMDB_ACCESS_TOKEN` to retrieve and cache movie poster images on-demand.
 
 ### 2. Frontend Application (`frontend/`)
 * **Vite + React Template**: Replaces Streamlit with a highly performant, responsive React app.
@@ -21,8 +22,10 @@ We transitioned the project from a monolithic Streamlit layout to a distributed 
 * **Zustand Store (`store/useAppStore.js`)**: State management is fully decoupled from components. UI state, session profiles, algorithm controls, and recommendation data slices are handled in a single atom.
 * **Settings Control Center (`SidebarSettings.jsx`)**: Real-time sliders to tune Collaborative weight, Novelty penalty, and Genre diversity penalty.
 * **Onboarding Module (`Onboarding.jsx`)**: Cold-start resolver mapping queries through Content TF-IDF similarities to bootstrap guest profiles.
-* **Global Activity Feed (`LiveFeed.jsx`)**: Live sidebar component polling the backend SQLite logs every 5 seconds to display updates from *all* active user sessions.
+* **Global Activity Feed (`LiveFeed.jsx`)**: Live sidebar component polling the backend active database logs every 5 seconds to display updates from *all* active user sessions.
 * **Diagnostics Dashboard (`VisualCharts.jsx`)**: SVG line plots displaying SVD explained variance and an animated coordinate equalizer showing latent user coordinate shifts.
+* **Movie Poster Render Grid (`MovieShelf.jsx`)**: Renders high-quality TMDB movie posters dynamically with an elegant hover micro-animation.
+
 
 ---
 
