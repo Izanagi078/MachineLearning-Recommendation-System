@@ -27,3 +27,12 @@ class DBRating(Base):
     movieId = Column(Integer, index=True, nullable=False)
     rating = Column(Float, nullable=False)
     timestamp = Column(Integer, nullable=False)
+
+class DBUserPreference(Base):
+    __tablename__ = "user_preferences"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    userId = Column(String, index=True, nullable=False)
+    preference_type = Column(String, nullable=False)  # "genre", "keyword", or "seed_movie"
+    preference_value = Column(String, nullable=False)
+

@@ -94,35 +94,6 @@ def startup_event():
 
     db = SessionLocal()
     try:
-        # Seed movies table from cache if empty
-        if db.query(DBMovie).count() == 0:
-            print("[Startup] Seeding database movies table from cached data...")
-            movies_to_insert = []
-            for _, row in app.state.cache["movies"].iterrows():
-                title_str = str(row.get("title", ""))
-                genres_str = str(row.get("genres", ""))
-                metadata_text = row.get("metadata_text", f"{title_str} {genres_str.replace('|', ' ')}")
-                links_df = app.state.cache["links"]
-                tmdb_row = links_df[links_df["movieId"] == row["movieId"]]
-                tmdb_id = (
-                    int(tmdb_row["tmdbId"].values[0])
-                    if not tmdb_row.empty and not pd.isna(tmdb_row["tmdbId"].values[0])
-                    else None
-                )
-                movies_to_insert.append(
-                    DBMovie(
-                        movieId=int(row["movieId"]),
-                        title=title_str,
-                        genres=genres_str,
-                        metadata_text=str(metadata_text),
-                        tmdbId=tmdb_id,
-                        is_active=True,
-                    )
-                )
-            db.bulk_save_objects(movies_to_insert)
-            db.commit()
-            print(f"[Startup] Seeded {len(movies_to_insert)} movies.")
-
         # Load catalog into memory
         all_movies = db.query(DBMovie).all()
         app.state.movies_df = pd.DataFrame([{

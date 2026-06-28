@@ -93,7 +93,7 @@ def run_tests():
     # 6. Test Online SVD SGD Updates
     print("\n6. Testing Online SVD SGD Updates...")
     # Add a rating and verify matrix changes
-    user_row_idx = col_model.user_mapper[test_user_id]
+    user_row_idx = col_model.user_mapper[str(test_user_id)]
     movie_col_idx = col_model.movie_mapper[test_movie_id]
     
     orig_p = col_model.P[user_row_idx].copy()

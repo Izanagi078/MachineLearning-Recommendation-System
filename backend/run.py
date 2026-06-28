@@ -13,5 +13,14 @@ if __name__ == "__main__":
     # Set PYTHONPATH environment variable so Uvicorn reloader subprocesses inherit it
     os.environ["PYTHONPATH"] = project_root + os.pathsep + os.environ.get("PYTHONPATH", "")
     
+    env = os.environ.get("ENVIRONMENT", "development").lower()
+    default_host = "0.0.0.0" if env == "production" else "127.0.0.1"
+    host = os.environ.get("HOST", default_host)
+    
+    # Dynamic port configuration for production platforms (e.g. Render, Railway)
+    port = int(os.environ.get("PORT", 8000))
+    reload = env == "development"
+    
     print(f"[Backend Runner] Setting PYTHONPATH to: {project_root}")
-    uvicorn.run("backend.app.main:app", host="127.0.0.1", port=8000, reload=True)
+    print(f"[Backend Runner] Starting server on {host}:{port} (reload={reload}, env={env})")
+    uvicorn.run("backend.app.main:app", host=host, port=port, reload=reload)

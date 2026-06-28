@@ -52,6 +52,13 @@ class TestSearch:
         res = client.get("/api/movies/search?query=test+movie")
         assert res.status_code == 200
 
+    def test_search_by_genre(self, client):
+        res = client.get("/api/movies/search?query=Action")
+        assert res.status_code == 200
+        data = res.json()
+        assert len(data) > 0
+        assert any("Action" in m["genres"] for m in data)
+
     def test_archived_movie_excluded(self, client):
         """'Archived Film' is is_active=False — should not appear in search results."""
         res = client.get("/api/movies/search?query=Archived")

@@ -55,7 +55,10 @@ def search_movies(request: Request, query: str, limit: int = 10, db: Session = D
 
     from backend.app.main import app
     active = app.state.movies_df[app.state.movies_df["is_active"] == True]
-    matches = active[active["title"].str.contains(query, case=False, na=False)].head(limit)
+    matches = active[
+        active["title"].str.contains(query, case=False, na=False) |
+        active["genres"].str.contains(query, case=False, na=False)
+    ].head(limit)
     records = matches.to_dict(orient="records")
     for r in records:
         enrich_movie_poster(r, db)
@@ -109,6 +112,12 @@ def add_movie(
     # Invalidate cache since movie count changed
     invalidate_all_caches()
 
+    try:
+        from backend.app.routers.feed import trigger_broadcast_update
+        trigger_broadcast_update(db)
+    except Exception as e:
+        print(f"Failed to broadcast movie addition: {e}")
+
     return db_movie
 
 
@@ -137,5 +146,11 @@ def delete_movie(
 
     # Invalidate cache since active movie count and list changed
     invalidate_all_caches()
+
+    try:
+        from backend.app.routers.feed import trigger_broadcast_update
+        trigger_broadcast_update(db)
+    except Exception as e:
+        print(f"Failed to broadcast movie deletion: {e}")
 
     return {"message": f"Movie {movieId} archived successfully."}

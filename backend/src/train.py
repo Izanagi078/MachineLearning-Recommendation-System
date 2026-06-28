@@ -18,8 +18,46 @@ def train_and_save_models():
     if not os.path.exists(MODELS_DIR):
         os.makedirs(MODELS_DIR)
         
-    print("[train] Loading dataset...")
     ratings, movies, links = load_recommender_data()
+    
+    # Seed database movies table if empty
+    from backend.app.database import engine, Base, SessionLocal
+    from backend.app.models_db import DBMovie
+    
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    try:
+        if db.query(DBMovie).count() == 0:
+            print("[train] Seeding database movies table from loaded dataset...")
+            movies_to_insert = []
+            for _, row in movies.iterrows():
+                title_str = str(row.get("title", ""))
+                genres_str = str(row.get("genres", ""))
+                metadata_text = row.get("metadata_text", f"{title_str} {genres_str.replace('|', ' ')}")
+                tmdb_row = links[links["movieId"] == row["movieId"]]
+                tmdb_id = (
+                    int(tmdb_row["tmdbId"].values[0])
+                    if not tmdb_row.empty and not pd.isna(tmdb_row["tmdbId"].values[0])
+                    else None
+                )
+                movies_to_insert.append(
+                    DBMovie(
+                        movieId=int(row["movieId"]),
+                        title=title_str,
+                        genres=genres_str,
+                        metadata_text=str(metadata_text),
+                        tmdbId=tmdb_id,
+                        is_active=True,
+                    )
+                )
+            db.bulk_save_objects(movies_to_insert)
+            db.commit()
+            print(f"[train] Seeded {len(movies_to_insert)} movies into database.")
+    except Exception as e:
+        print(f"[train] Failed to seed database: {e}")
+        db.rollback()
+    finally:
+        db.close()
     
     # --- 1. Model Validation (80/20 Train-Test Split) ---
     print("\n--- Model Validation (80/20 Split) ---")

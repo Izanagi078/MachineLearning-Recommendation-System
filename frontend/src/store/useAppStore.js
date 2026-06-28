@@ -28,10 +28,11 @@ const useAppStore = create((set, get) => ({
   popularMovies: [],
   feed: [],
   stats: null,
+  ws: null,
 
   // ── Algorithm Controls ──────────────────────────────────────────────────────
   weightCol: 0.5,
-  novelty: 0.0,
+  novelty: 0.15,
   diversity: 0.2,
 
   // ── UI State ────────────────────────────────────────────────────────────────
@@ -177,6 +178,54 @@ const useAppStore = create((set, get) => ({
   // ── Actions: Modal ──────────────────────────────────────────────────────────
   openLoginModal: () => set({ isLoginModalOpen: true }),
   closeLoginModal: () => set({ isLoginModalOpen: false }),
+
+  // ── Actions: WebSockets ─────────────────────────────────────────────────────
+  initWebSocket() {
+    const existingWs = get().ws;
+    if (existingWs && (existingWs.readyState === WebSocket.OPEN || existingWs.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
+    const base = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000';
+    const wsUrl = base.replace(/^http/, 'ws') + '/api/v1/ws/feed';
+    
+    console.log(`Connecting to WebSocket: ${wsUrl}`);
+    const socket = new WebSocket(wsUrl);
+
+    socket.onopen = () => {
+      console.log('WebSocket connected successfully');
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'sync') {
+          console.log('WebSocket sync message received:', data);
+          set({
+            stats: data.stats,
+            feed: data.feed,
+          });
+        }
+      } catch (e) {
+        console.error('Failed to parse WebSocket message', e);
+      }
+    };
+
+    socket.onclose = () => {
+      console.log('WebSocket connection closed. Retrying in 3 seconds...');
+      set({ ws: null });
+      setTimeout(() => {
+        get().initWebSocket();
+      }, 3000);
+    };
+
+    socket.onerror = (err) => {
+      console.error('WebSocket connection error:', err);
+      socket.close();
+    };
+
+    set({ ws: socket });
+  },
 }));
 
 export default useAppStore;

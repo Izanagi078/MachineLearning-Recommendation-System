@@ -49,7 +49,7 @@ export default function SidebarSettings({
 
       <div className="slider-group">
         <div className="slider-header">
-          <span>Collaborative SVD Weight</span>
+          <span>Recommendation Blend</span>
           <span style={{ color: '#818cf8', fontWeight: 'bold' }}>{weightCol.toFixed(2)}</span>
         </div>
         <input
@@ -61,13 +61,13 @@ export default function SidebarSettings({
           onChange={(e) => setWeightCol(parseFloat(e.target.value))}
         />
         <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-          Balances latents-based collaborative filtering vs. content description vectors.
+          Balance between global community trends and your personalized onboarding choices.
         </p>
       </div>
 
       <div className="slider-group">
         <div className="slider-header">
-          <span>Novelty (Hidden Gems) Bias</span>
+          <span>Discovery Bias</span>
           <span style={{ color: '#818cf8', fontWeight: 'bold' }}>{novelty.toFixed(2)}</span>
         </div>
         <input
@@ -79,13 +79,13 @@ export default function SidebarSettings({
           onChange={(e) => setNovelty(parseFloat(e.target.value))}
         />
         <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-          Penalizes globally popular hits to surface obscure, highly-rated treasures.
+          Boost underrated, less-popular hidden gems matching your taste profile.
         </p>
       </div>
 
       <div className="slider-group">
         <div className="slider-header">
-          <span>Genre Diversity Bias</span>
+          <span>Genre Diversity</span>
           <span style={{ color: '#818cf8', fontWeight: 'bold' }}>{diversity.toFixed(2)}</span>
         </div>
         <input
@@ -97,7 +97,7 @@ export default function SidebarSettings({
           onChange={(e) => setDiversity(parseFloat(e.target.value))}
         />
         <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-          Greedy re-ranking filter to prevent multiple recommendations of overlapping genres.
+          Mix it up by preventing recommendations from being dominated by a single genre.
         </p>
       </div>
 

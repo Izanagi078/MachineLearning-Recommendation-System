@@ -68,3 +68,62 @@ def test_content_model_tfidf():
     assert new_idx == 3
     assert model.tfidf_matrix.shape[0] == 4
     assert 104 in model.movie_id_to_idx
+
+def test_hybrid_recommender_onboarding_preferences():
+    from backend.src.models import HybridRecommender
+    
+    # 1. Create a dummy movies dataset
+    movies_data = pd.DataFrame([
+        {"movieId": 1, "title": "Romance 1", "genres": "Romance|Fantasy", "metadata_text": "romance 1 romance fantasy"},
+        {"movieId": 2, "title": "Romance 2", "genres": "Romance|Drama", "metadata_text": "romance 2 romance drama"},
+        {"movieId": 3, "title": "Drama 1", "genres": "Drama|Comedy", "metadata_text": "drama 1 drama comedy"},
+        {"movieId": 4, "title": "Comedy 1", "genres": "Comedy", "metadata_text": "comedy 1 comedy"},
+        {"movieId": 5, "title": "Fantasy 1", "genres": "Fantasy|Romance", "metadata_text": "fantasy 1 fantasy romance"},
+    ])
+    
+    col_model = CollaborativeModel(n_factors=2)
+    # Fit SVD on some dummy ratings
+    ratings_data = pd.DataFrame([
+        {"userId": "1", "movieId": 1, "rating": 4.0, "timestamp": 100000},
+        {"userId": "1", "movieId": 3, "rating": 5.0, "timestamp": 100000},
+        {"userId": "2", "movieId": 2, "rating": 3.0, "timestamp": 100000},
+    ])
+    col_model.fit(ratings_data, apply_decay=False)
+    
+    content_model = ContentModel()
+    content_model.fit(movies_data)
+    
+    recommender = HybridRecommender(col_model, content_model)
+    
+    # User has rated "Romance 2" (contains Romance/Drama) during onboarding
+    user_id = "guest_onboard"
+    ratings_df = pd.DataFrame([
+        {"userId": user_id, "movieId": 2, "rating": 5.0, "timestamp": 100000}
+    ])
+    col_model.register_new_user(user_id)
+    col_model.update_rating_online(user_id, 2, 5.0)
+    
+    # Recommendations with preferred genres Romance and Fantasy
+    recs = recommender.get_recommendations(
+        user_id=user_id,
+        movies_df=movies_data,
+        ratings_df=ratings_df,
+        top_n=3,
+        weight_collaborative=0.5,
+        diversity_weight=0.2,
+        novelty_weight=0.0,
+        preferred_genres=["Romance", "Fantasy"],
+        seed_movie_ids={2}
+    )
+    
+    assert not recs.empty
+    titles = recs["title"].tolist()
+    # "Romance 2" is excluded because it's rated.
+    # The remaining candidates are Romance 1, Drama 1, Comedy 1, Fantasy 1.
+    # Romance 1 (Romance|Fantasy) and Fantasy 1 (Fantasy|Romance) match BOTH preferred genres Romance & Fantasy, and should be ranked at the top!
+    # Drama 1 (Drama|Comedy) and Comedy 1 (Comedy) do not match preferred genres, so they should be lower.
+    assert "Romance 1" in titles
+    assert "Fantasy 1" in titles
+    # The top recommended movie should be Romance 1 or Fantasy 1
+    assert titles[0] in ["Romance 1", "Fantasy 1"]
+

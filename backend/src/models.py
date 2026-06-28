@@ -18,6 +18,8 @@ class CollaborativeModel:
         self.P = None  # Latent user matrix (N x K)
         self.Q = None  # Latent movie matrix (M x K)
         self.user_means = None  # pandas.Series of user mean ratings
+        self.user_rating_sums = {}
+        self.user_rating_counts = {}
         self.user_mapper = {}  # userId -> row_idx
         self.movie_mapper = {}  # movieId -> col_idx
         self.inv_movie_mapper = {}  # col_idx -> movieId
@@ -25,58 +27,112 @@ class CollaborativeModel:
 
     def fit(self, ratings_df: pd.DataFrame, apply_decay: bool = True, decay_lambda: float = 0.05):
         """
-        Fits TruncatedSVD on the user-movie rating matrix.
-        Extracts P and Q matrices for later online tuning.
+        Fits FunkSVD on the observed ratings using Stochastic Gradient Descent.
         """
-        self.global_mean = ratings_df['rating'].mean()
+        # Ensure userIds are strings
+        ratings_df = ratings_df.copy()
+        ratings_df['userId'] = ratings_df['userId'].astype(str)
         
-        # 1. Pivot ratings table (userId x movieId)
-        pivot = ratings_df.pivot(index='userId', columns='movieId', values='rating')
-        self.user_means = pivot.mean(axis=1).to_dict()
+        self.global_mean = float(ratings_df['rating'].mean())
         
-        # Centered pivot
-        pivot_centered = pivot.sub(pivot.mean(axis=1), axis=0)
-        
-        # 2. Apply Temporal Decay to centered ratings
-        if apply_decay and 'timestamp' in ratings_df.columns:
-            max_time = ratings_df['timestamp'].max()
-            time_diff_years = (max_time - ratings_df['timestamp']) / (60 * 60 * 24 * 365)
-            decay_weights = np.exp(-decay_lambda * time_diff_years)
-            
-            ratings_weighted = ratings_df.copy()
-            ratings_weighted['weight'] = decay_weights
-            ratings_weighted['weighted_centered'] = (ratings_weighted['rating'] - ratings_weighted['userId'].map(self.user_means)) * ratings_weighted['weight']
-            
-            pivot_imputed = ratings_weighted.pivot(index='userId', columns='movieId', values='weighted_centered')
-        else:
-            pivot_imputed = pivot_centered
-            
-        # Fill missing centered values with 0.0 (imputation at user mean)
-        pivot_imputed = pivot_imputed.fillna(0.0)
-        
-        # 3. Fit TruncatedSVD
-        n_components = min(self.n_factors, pivot_imputed.shape[0] - 1, pivot_imputed.shape[1] - 1)
-        self.svd = TruncatedSVD(n_components=n_components, random_state=42)
-        
-        # Extract Latent Factors
-        # P matrix (N x K Component Weights)
-        self.P = self.svd.fit_transform(pivot_imputed.values)
-        # Q matrix (M x K Components, transposed so shape is Movies x Components)
-        self.Q = self.svd.components_.T
-        
-        # Store index mappers
-        self.user_ids = pivot.index.tolist()
-        self.movie_ids = pivot.columns.tolist()
+        # 1. Store index mappers
+        self.user_ids = ratings_df['userId'].unique().tolist()
+        self.movie_ids = ratings_df['movieId'].unique().tolist()
         
         self.user_mapper = {uid: idx for idx, uid in enumerate(self.user_ids)}
         self.movie_mapper = {mid: idx for idx, mid in enumerate(self.movie_ids)}
         self.inv_movie_mapper = {idx: mid for idx, mid in enumerate(self.movie_ids)}
-        print(f"[CollaborativeModel] Trained SVD. P shape: {self.P.shape}, Q shape: {self.Q.shape}")
+        
+        # Populate sums and counts for tracking in-memory updates
+        self.user_rating_sums = ratings_df.groupby('userId')['rating'].sum().to_dict()
+        self.user_rating_counts = ratings_df.groupby('userId').size().to_dict()
+        
+        # Pre-calculate shrinkage user means (Bayesian shrinkage)
+        K = 5.0
+        self.user_means = {}
+        for uid in self.user_ids:
+            r_sum = self.user_rating_sums.get(uid, 0.0)
+            r_cnt = self.user_rating_counts.get(uid, 0)
+            self.user_means[uid] = float((r_sum + K * self.global_mean) / (r_cnt + K))
+        
+        n_users = len(self.user_ids)
+        n_items = len(self.movie_ids)
+        
+        # 2. Initialize latent factor matrices P and Q
+        scale = 1.0 / np.sqrt(self.n_factors)
+        self.P = np.random.normal(scale=scale, size=(n_users, self.n_factors))
+        self.Q = np.random.normal(scale=scale, size=(n_items, self.n_factors))
+        
+        # Prepare arrays for SGD
+        u_indices = np.array([self.user_mapper[uid] for uid in ratings_df['userId']])
+        m_indices = np.array([self.movie_mapper[mid] for mid in ratings_df['movieId']])
+        ratings = ratings_df['rating'].values
+        
+        # Apply temporal decay if weights are present
+        if apply_decay and 'timestamp' in ratings_df.columns:
+            max_time = ratings_df['timestamp'].max()
+            time_diff_years = (max_time - ratings_df['timestamp'].values) / (60 * 60 * 24 * 365)
+            weights = np.exp(-decay_lambda * time_diff_years)
+        else:
+            weights = np.ones(len(ratings))
+            
+        # SGD hyperparameters
+        lr_p = 0.05
+        lr_q = 0.005
+        reg = 0.02
+        epochs = 15
+        
+        # 3. Stochastic Gradient Descent Loop
+        for epoch in range(epochs):
+            indices = np.random.permutation(len(ratings))
+            for idx in indices:
+                u = u_indices[idx]
+                i = m_indices[idx]
+                r = ratings[idx]
+                w = weights[idx]
+                
+                uid = self.user_ids[u]
+                u_mean = self.user_means.get(uid, self.global_mean)
+                
+                # Predict rating (centered + user mean)
+                pred_centered = np.dot(self.P[u], self.Q[i])
+                pred = pred_centered + u_mean
+                error = r - pred
+                
+                # Apply learning rate weighted by decay weight
+                w_lr_p = lr_p * w
+                w_lr_q = lr_q * w
+                
+                # Perform latent vector adjustments
+                p_temp = self.P[u].copy()
+                q_temp = self.Q[i].copy()
+                
+                self.P[u] += w_lr_p * (error * q_temp - reg * p_temp)
+                self.Q[i] += w_lr_q * (error * p_temp - reg * q_temp)
+                
+        print(f"[CollaborativeModel] Trained FunkSVD. P shape: {self.P.shape}, Q shape: {self.Q.shape}")
+
+    def _ensure_attributes(self):
+        """
+        Ensures dynamically that all newer fields needed for Bayesian shrinkage and tracking 
+        exist after unpickling an older model file.
+        """
+        if not hasattr(self, 'user_rating_sums') or self.user_rating_sums is None:
+            self.user_rating_sums = {}
+        if not hasattr(self, 'user_rating_counts') or self.user_rating_counts is None:
+            self.user_rating_counts = {}
+        if not hasattr(self, 'user_means') or self.user_means is None:
+            self.user_means = {}
+        elif isinstance(self.user_means, pd.Series):
+            self.user_means = self.user_means.to_dict()
+        if not hasattr(self, 'global_mean') or self.global_mean is None:
+            self.global_mean = 3.5
 
     def predict_rating(self, user_id, movie_id) -> float:
         """
         Predicts rating dynamically using the dot product of user vector P_u and movie vector Q_i.
         """
+        self._ensure_attributes()
         # Clean user_id input
         u_str = str(user_id)
         u_int = int(user_id) if str(user_id).isdigit() else None
@@ -111,6 +167,8 @@ class CollaborativeModel:
         """
         Registers a new user by appending an empty row to matrix P.
         """
+        self._ensure_attributes()
+        user_id = str(user_id)
         if user_id in self.user_mapper:
             return self.user_mapper[user_id]
             
@@ -121,6 +179,11 @@ class CollaborativeModel:
         # Initialize a new latent vector row (small random variance)
         new_vec = np.random.normal(scale=0.01, size=(1, self.P.shape[1]))
         self.P = np.vstack([self.P, new_vec])
+        
+        # Initialize rating tracking stats
+        if user_id not in self.user_rating_sums:
+            self.user_rating_sums[user_id] = 0.0
+            self.user_rating_counts[user_id] = 0
         
         # Initialize user mean to default global average
         self.user_means[user_id] = float(self.global_mean)
@@ -148,24 +211,27 @@ class CollaborativeModel:
         to adjust the latent User vector (P_u) and movie vector (Q_i) in-memory.
         Runs for multiple epochs to accelerate convergence for dynamic profiling.
         """
+        self._ensure_attributes()
+        user_id = str(user_id)
         u_idx = self.register_new_user(user_id)
         m_idx = self.register_new_movie(movie_id)
         
-        # 1. Retrieve the user's running mean rating (baseline bias parameter)
-        user_key = user_id if user_id in self.user_means else str(user_id)
-        if user_key not in self.user_means:
-            self.user_means[user_key] = float(self.global_mean)
+        # Update running stats for Bayesian shrinkage
+        self.user_rating_sums[user_id] = self.user_rating_sums.get(user_id, 0.0) + rating
+        self.user_rating_counts[user_id] = self.user_rating_counts.get(user_id, 0) + 1
+        
+        # Re-estimate shrinkage user mean
+        r_sum = self.user_rating_sums[user_id]
+        r_cnt = self.user_rating_counts[user_id]
+        self.user_means[user_id] = float((r_sum + 5.0 * self.global_mean) / (r_cnt + 5.0))
             
         # 2. Run multiple update epochs to boost responsiveness
         for _ in range(epochs):
             pred_centered = np.dot(self.P[u_idx], self.Q[m_idx])
-            pred_rating = pred_centered + self.user_means[user_key]
+            pred_rating = pred_centered + self.user_means[user_id]
             error = rating - pred_rating
             
-            # Incrementally adjust user rating bias/mean with error correction
-            self.user_means[user_key] = float(np.clip(self.user_means[user_key] + 0.1 * error, 0.5, 5.0))
-            
-            # Perform SVD Latent Vector adjustments using SGD equations
+            # Perform SVD Latent Vector adjustments using SGD equations (do not adjust mean bias inside loop)
             p_temp = self.P[u_idx].copy()
             q_temp = self.Q[m_idx].copy()
             
@@ -239,8 +305,14 @@ class HybridRecommender:
                              weight_collaborative: float = 0.5, 
                              diversity_weight: float = 0.0, 
                              novelty_weight: float = 0.0, 
-                             session_ratings: dict = None) -> pd.DataFrame:
+                             session_ratings: dict = None,
+                             preferred_genres: list = None,
+                             preferred_keywords: list = None,
+                             seed_movie_ids: set = None) -> pd.DataFrame:
         session_ratings = session_ratings or {}
+        preferred_genres = preferred_genres or []
+        preferred_keywords = preferred_keywords or []
+        seed_movie_ids = seed_movie_ids or set()
         
         # Exclude movies this user has already rated in ratings_df or active session
         rated_movie_ids = set()
@@ -273,11 +345,29 @@ class HybridRecommender:
         n_features = self.content_model.tfidf_matrix.shape[1]
         u_text_vector = np.zeros((1, n_features))
         has_text_profile = False
+        n_user_ratings = 0
+
+        # Apply baseline boosts for explicit user onboarding preferences
+        for g in preferred_genres:
+            g_low = g.lower().strip()
+            if g_low in self.content_model.vectorizer.vocabulary_:
+                g_idx = self.content_model.vectorizer.vocabulary_[g_low]
+                u_text_vector[0, g_idx] += 12.0
+                has_text_profile = True
+
+        for kw in preferred_keywords:
+            words = [w.lower().strip() for w in kw.split() if w.strip()]
+            for w in words:
+                if w in self.content_model.vectorizer.vocabulary_:
+                    w_idx = self.content_model.vectorizer.vocabulary_[w]
+                    u_text_vector[0, w_idx] += 6.0
+                    has_text_profile = True
         
         # Aggregate historical high ratings with exponential time decay (6 hours halflife)
         if user_key is not None:
             import time
             user_ratings = ratings_df[ratings_df['userId'] == user_key]
+            n_user_ratings = len(user_ratings)
             if not user_ratings.empty:
                 max_time = user_ratings['timestamp'].max() if 'timestamp' in user_ratings.columns else time.time()
                 for _, r_row in user_ratings.iterrows():
@@ -291,7 +381,28 @@ class HybridRecommender:
                             time_weight = np.exp(-age / 21600.0)  # 6 hours halflife
                             time_weight = max(time_weight, 0.1)  # keep older preferences at min 10% weight
                             
+                            # Add standard TF-IDF vector
                             u_text_vector += weight * time_weight * self.content_model.tfidf_matrix[m_idx].toarray()
+                            
+                            # Genre Boosting: Extract genres and boost vocabulary coordinates
+                            genres_str = str(r_row.get('genres', ''))
+                            if not genres_str or genres_str == 'nan':
+                                m_row = movies_df[movies_df['movieId'] == mid]
+                                if not m_row.empty:
+                                    genres_str = str(m_row.iloc[0].get('genres', ''))
+                            
+                            genres_list = [g.lower().strip() for g in genres_str.split('|') if g.strip()]
+                            preferred_genres_lower = {pg.lower().strip() for pg in preferred_genres}
+                            for g in genres_list:
+                                if g in self.content_model.vectorizer.vocabulary_:
+                                    # For onboarding seed movies, only boost explicitly preferred genres
+                                    if mid in seed_movie_ids and preferred_genres_lower:
+                                        if g not in preferred_genres_lower:
+                                            continue
+                                    g_idx = self.content_model.vectorizer.vocabulary_[g]
+                                    # Boost genre term
+                                    u_text_vector[0, g_idx] += weight * time_weight * 5.0
+                                    
                             has_text_profile = True
                         
         # Aggregate live session ratings
@@ -300,9 +411,24 @@ class HybridRecommender:
                 m_idx = self.content_model.movie_id_to_idx[mid]
                 weight = rating - 3.0
                 if weight > 0:
+                    # Add standard TF-IDF vector
                     u_text_vector += weight * 1.0 * self.content_model.tfidf_matrix[m_idx].toarray()
+                    
+                    # Genre Boosting for session ratings
+                    m_row = movies_df[movies_df['movieId'] == mid]
+                    if not m_row.empty:
+                        genres_str = str(m_row.iloc[0].get('genres', ''))
+                        genres_list = [g.lower().strip() for g in genres_str.split('|') if g.strip()]
+                        for g in genres_list:
+                            if g in self.content_model.vectorizer.vocabulary_:
+                                g_idx = self.content_model.vectorizer.vocabulary_[g]
+                                # Extra strong boost for real-time changes
+                                u_text_vector[0, g_idx] += weight * 10.0
+                                
                     has_text_profile = True
                     
+        total_user_ratings = n_user_ratings + len(session_ratings)
+        
         # 2. Score Candidates
         candidate_ids = candidates_df['movieId'].values
         candidate_indices = [self.content_model.movie_id_to_idx[mid] for mid in candidate_ids if mid in self.content_model.movie_id_to_idx]
@@ -321,9 +447,11 @@ class HybridRecommender:
         else:
             content_scores = np.zeros(len(candidate_ids))
             
-        # Dynamic blending weight allocation (force content if true new profile)
-        is_new_user = user_key is None
-        active_weight = 0.0 if (is_new_user and not session_ratings) else weight_collaborative
+        # Dynamic blending weight allocation (force content only if absolute cold start with 0 ratings)
+        if total_user_ratings == 0:
+            active_weight = 0.0
+        else:
+            active_weight = weight_collaborative
         
         hybrid_scores = active_weight * col_predictions_norm + (1.0 - active_weight) * content_scores
         
@@ -337,11 +465,40 @@ class HybridRecommender:
         
         adjusted_scores = hybrid_scores * (1.0 - novelty_weight * candidate_popularity_norm)
         
+        # Add a tiny random jitter (1% exploration noise) to prevent static layouts and break popularity ties
+        import time
+        np.random.seed(int(time.time()) % 10000)
+        jitter = np.random.normal(scale=0.01, size=len(adjusted_scores))
+        adjusted_scores = adjusted_scores + jitter
+        
         candidates_df['base_score'] = hybrid_scores
         candidates_df['col_prediction'] = col_predictions
         candidates_df['content_similarity'] = content_scores
         candidates_df['final_score'] = adjusted_scores
         candidates_df['popularity_hits'] = candidate_popularity
+        
+        # Extract user's favorite genres (rated >= 4.0 or from active session ratings)
+        # Always include explicitly preferred genres from onboarding
+        favorite_genres = set(preferred_genres)
+        if user_key is not None:
+            user_ratings = ratings_df[ratings_df['userId'] == user_key]
+            high_ratings = user_ratings[user_ratings['rating'] >= 4.0]
+            for _, r_row in high_ratings.iterrows():
+                mid = r_row['movieId']
+                # If this is a seed movie, do not add its incidental genres
+                if mid in seed_movie_ids:
+                    continue
+                m_row = movies_df[movies_df['movieId'] == mid]
+                if not m_row.empty:
+                    genres_str = str(m_row.iloc[0].get('genres', ''))
+                    favorite_genres.update(g.strip() for g in genres_str.split('|') if g.strip())
+                    
+        for mid, rating in session_ratings.items():
+            if rating >= 4.0:
+                m_row = movies_df[movies_df['movieId'] == mid]
+                if not m_row.empty:
+                    genres_str = str(m_row.iloc[0].get('genres', ''))
+                    favorite_genres.update(g.strip() for g in genres_str.split('|') if g.strip())
         
         # 4. Apply Greedy Genre Diversification
         if diversity_weight > 0.0:
@@ -362,8 +519,12 @@ class HybridRecommender:
                     movie_genres = set(row['genres'].split('|'))
                     
                     if selected_genres:
-                        overlap = len(selected_genres.intersection(movie_genres))
-                        penalty = (overlap / len(movie_genres)) * diversity_weight
+                        # Excluded favorite genres receive a 75% discount (0.25 penalty weight)
+                        fav_overlap = len(selected_genres.intersection(movie_genres.intersection(favorite_genres)))
+                        non_fav_overlap = len(selected_genres.intersection(movie_genres.difference(favorite_genres)))
+                        
+                        effective_overlap = 0.25 * fav_overlap + 1.0 * non_fav_overlap
+                        penalty = (effective_overlap / len(movie_genres)) * diversity_weight
                     else:
                         penalty = 0.0
                         

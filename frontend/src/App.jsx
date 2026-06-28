@@ -3,7 +3,6 @@ import SidebarSettings from './components/SidebarSettings';
 import LiveFeed from './components/LiveFeed';
 import Onboarding from './components/Onboarding';
 import MovieShelf from './components/MovieShelf';
-import VisualCharts from './components/VisualCharts';
 import LoginModal from './components/LoginModal';
 import useAppStore from './store/useAppStore';
 
@@ -21,26 +20,23 @@ export default function App() {
     setWeightCol, setNovelty, setDiversity,
     setLogin, resetSession, completeOnboarding,
     openLoginModal, closeLoginModal,
+    initWebSocket,
   } = useAppStore();
 
-  // 1. Initial page load — fetch stats, popular, feed
+  // 1. Initial page load — fetch popular list and initialize WebSocket stream
   useEffect(() => {
-    fetchStats();
     fetchPopular();
-    fetchFeed();
-
-    // Poll feed + stats every 5 seconds for real-time multiplayer updates
-    const interval = setInterval(() => {
-      fetchFeed();
-      fetchStats();
-    }, 5000);
-
-    return () => clearInterval(interval);
+    initWebSocket();
   }, []);
 
-  // 2. Fetch recommendations when userId or algorithm params change
+  // 2. Fetch recommendations when userId or algorithm params change (debounced to prevent request storm)
   useEffect(() => {
-    if (userId) fetchRecommendations();
+    if (userId) {
+      const timer = setTimeout(() => {
+        fetchRecommendations();
+      }, 250);
+      return () => clearTimeout(timer);
+    }
   }, [userId, weightCol, novelty, diversity]);
 
   // 2b. Load user ratings history when session starts or changes
@@ -88,9 +84,9 @@ export default function App() {
       {/* Main Content: Center Column */}
       <main className="main-content">
         <div>
-          <h1>🎬 Personal Recommendations Portal</h1>
+          <h1>🎬 CineStream AI</h1>
           <p style={{ color: 'var(--text-secondary)' }}>
-            Real-time SVD matrix factorizer &amp; content keyword TF-IDF ensembled engine.
+            Your ultimate cinematic journey, personalized by advanced hybrid intelligence.
           </p>
         </div>
 
@@ -110,29 +106,12 @@ export default function App() {
           </div>
         ) : (
           <>
-            {/* Stats Banner */}
-            {stats && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px' }}>
-                {[
-                  { label: 'RMSE (Accuracy)', value: stats.metrics.rmse.toFixed(4), color: 'var(--accent-emerald)' },
-                  { label: 'NDCG@10 Rank', value: `${(stats.metrics.ndcg_10 * 100).toFixed(2)}%`, color: '#ffffff' },
-                  { label: 'MAP@10 Precision', value: `${(stats.metrics.map_10 * 100).toFixed(2)}%`, color: '#ffffff' },
-                  { label: 'Model Users (SVD)', value: stats.users_count, color: '#ffffff' },
-                ].map(({ label, value, color }) => (
-                  <div key={label} className="glass-card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '14px' }}>
-                    <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>{label}</span>
-                    <span style={{ fontSize: '1.4rem', fontWeight: 'bold', color, marginTop: '4px' }}>{value}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-
             {/* Search */}
             <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <h3 style={{ fontSize: '0.85rem' }}>🔍 Search Catalog &amp; Rate</h3>
               <input
                 type="text"
-                placeholder="Search movies to rate and instantly influence SVD vectors..."
+                placeholder="Search movies to rate and instantly influence recommendations..."
                 value={searchQuery}
                 onChange={(e) => handleSearch(e.target.value)}
                 style={{
@@ -149,7 +128,7 @@ export default function App() {
             {/* Recommendations */}
             {isLoading ? (
               <div className="glass-card" style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                Re-indexing user latent matrix coordinates...
+                Tailoring recommendations to your latest tastes...
               </div>
             ) : errorMsg ? (
               <div className="glass-card" style={{ padding: '24px', textAlign: 'center', color: 'var(--accent-rose)' }}>
@@ -161,11 +140,9 @@ export default function App() {
 
             {/* Popular */}
             <MovieShelf title="🔥 Popular Right Now" movies={popularMovies} onRate={rateMovie} onDelete={deleteMovie} sessionRatings={sessionRatings} />
-
-            {/* Charts */}
-            {stats && <VisualCharts stats={stats} />}
           </>
-        )}
+        )
+      }
       </main>
 
       {/* Right Sidebar: Session Profile + Live Feed */}
